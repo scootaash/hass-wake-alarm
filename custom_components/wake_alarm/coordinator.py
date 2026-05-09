@@ -79,6 +79,9 @@ class WakeAlarmCoordinator:
         self._music_task: asyncio.Task | None = None
         self._music_cancel_event: asyncio.Event | None = None
 
+        # Media selection sensor (registered when sensor entity adds itself)
+        self._media_sensor = None  # type: ignore[var-annotated]
+
     # -------------------- public state --------------------
 
     @property
@@ -287,11 +290,31 @@ class WakeAlarmCoordinator:
                 "music already running for %s; skipping start", self.slug
             )
             return
+        # Precondition: no media picked → skip music entirely. At alarm fire
+        # time the urgent notification path takes over (step 7); for the test
+        # button it is just a no-op with a log line.
+        if self.current_media() is None:
+            _LOGGER.warning(
+                "music skipped for %s: no media selected (use the card to pick)",
+                self.slug,
+            )
+            self._async_handle_no_media()
+            return
         self._set_state(STATE_PLAYING)
         self._music_cancel_event = asyncio.Event()
         self._music_task = self.hass.async_create_task(
             self._music_runner(end_state)
         )
+
+    @callback
+    def _async_handle_no_media(self) -> None:
+        """Hook for the urgent 'no media configured' notification path.
+
+        Wired up properly in step 7 (mobile notifications). For now this is
+        a placeholder so the call site reads correctly.
+        """
+        # TODO step 7: notify.<urgent target> with the no-media message
+        return
 
     async def _music_runner(self, end_state: str) -> None:
         try:
@@ -305,6 +328,43 @@ class WakeAlarmCoordinator:
             self._music_cancel_event = None
             if self._state == STATE_PLAYING:
                 self._set_state(end_state)
+
+    # -------------------- media selection --------------------
+
+    @callback
+    def register_media_sensor(self, sensor) -> None:
+        """Called by the media_selection sensor on async_added_to_hass."""
+        self._media_sensor = sensor
+
+    @callback
+    def current_media(self) -> dict | None:
+        """Return the persisted media selection or None if nothing is picked."""
+        if self._media_sensor is None:
+            return None
+        return self._media_sensor.selection_data()
+
+    @callback
+    def async_set_media(
+        self,
+        *,
+        content_id: str,
+        content_type: str,
+        title: str,
+        thumbnail: str | None,
+    ) -> None:
+        """Persist a new media selection. Used by wake_alarm.set_media."""
+        if self._media_sensor is None:
+            _LOGGER.warning(
+                "set_media called for %s before media sensor was ready",
+                self.slug,
+            )
+            return
+        self._media_sensor.update_selection(
+            content_id=content_id,
+            content_type=content_type,
+            title=title,
+            thumbnail=thumbnail,
+        )
 
     # -------------------- override detection --------------------
 

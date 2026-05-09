@@ -13,16 +13,8 @@
       },
       "media_players": {
         "title": "Media players",
-        "description": "Pick speakers for music playback. To select multiple, all must come from the same integration AND support synchronised group playback.",
+        "description": "Pick speakers for music playback. To select multiple, all must come from the same integration AND support synchronised group playback. Media content is picked later via the card's media browser, not here.",
         "data": { "media_player_entities": "Media players" }
-      },
-      "media_content": {
-        "title": "Media content",
-        "description": "What to play. For Sonos favourites use favorite_item_id with a value like FV:2/5. For Spotify use playlist with a URI like spotify:playlist:.... For a stream use url.",
-        "data": {
-          "media_content_id": "Media content ID",
-          "media_content_type": "Media content type"
-        }
       },
       "presence": {
         "title": "Presence (optional)",
@@ -31,7 +23,7 @@
       },
       "notifications": {
         "title": "Notifications (optional)",
-        "description": "Mobile notification targets. Standard fires at alarm time. Urgent fires only if any speaker is unavailable.",
+        "description": "Mobile notification targets. Standard fires at alarm time. Urgent fires only if any speaker is unavailable or no media has been picked.",
         "data": {
           "notify_target_standard": "Standard notify service",
           "notify_target_urgent": "Urgent notify service"
@@ -39,7 +31,7 @@
       },
       "confirm": {
         "title": "Confirm",
-        "description": "About to create the alarm with these settings:\n\n{summary}"
+        "description": "About to create the alarm with these settings:\n\n{summary}\n\nAfter creation, open the card and pick what to play in the settings view."
       }
     },
     "error": {
@@ -61,13 +53,6 @@
       "media_players": {
         "title": "Media players",
         "data": { "media_player_entities": "Media players" }
-      },
-      "media_content": {
-        "title": "Media content",
-        "data": {
-          "media_content_id": "Media content ID",
-          "media_content_type": "Media content type"
-        }
       },
       "presence": {
         "title": "Presence",
@@ -122,7 +107,8 @@
           "playing": "Playing",
           "snoozing": "Snoozing"
         }
-      }
+      },
+      "media_selection": { "name": "Media selection" }
     },
     "binary_sensor": {
       "active": { "name": "Active" }
@@ -133,6 +119,30 @@
       "test_music": { "name": "Test music" },
       "dismiss": { "name": "Dismiss" },
       "snooze": { "name": "Snooze" }
+    }
+  },
+  "services": {
+    "set_media": {
+      "name": "Set media",
+      "description": "Persist a media selection for a Wake Alarm instance. Called by the card after the user picks media via the browser modal.",
+      "fields": {
+        "media_content_id": {
+          "name": "Media Content ID",
+          "description": "The media_content_id returned by HA's media browser (e.g. FV:2/5 for a Sonos favourite, spotify:playlist:..., or a stream URL)."
+        },
+        "media_content_type": {
+          "name": "Media Content Type",
+          "description": "The media_content_type returned by HA's media browser (e.g. favorite_item_id, playlist, music, url)."
+        },
+        "title": {
+          "name": "Title",
+          "description": "Friendly title shown in the card and used as the sensor's state."
+        },
+        "thumbnail": {
+          "name": "Thumbnail URL",
+          "description": "Optional thumbnail URL for display in the card."
+        }
+      }
     }
   }
 }

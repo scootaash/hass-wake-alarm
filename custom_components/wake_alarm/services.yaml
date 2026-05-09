@@ -1,0 +1,44 @@
+set_media:
+  name: Set media
+  description: >
+    Persist a media selection for a Wake Alarm instance. Called by the card
+    after the user picks media via the browser modal. The selection is
+    surfaced via sensor.<slug>_media_selection and used by the music
+    sequence at alarm time.
+  target:
+    entity:
+      integration: wake_alarm
+  fields:
+    media_content_id:
+      name: Media Content ID
+      description: >
+        The media_content_id returned by HA's media browser
+        (e.g. FV:2/5 for a Sonos favourite, spotify:playlist:..., or a
+        stream URL).
+      required: true
+      example: "FV:2/5"
+      selector:
+        text:
+    media_content_type:
+      name: Media Content Type
+      description: >
+        The media_content_type returned by HA's media browser
+        (e.g. favorite_item_id, playlist, music, url).
+      required: true
+      example: "favorite_item_id"
+      selector:
+        text:
+    title:
+      name: Title
+      description: Friendly title shown in the card and used as the sensor's state.
+      required: true
+      example: "Morning Wake Up Mix"
+      selector:
+        text:
+    thumbnail:
+      name: Thumbnail URL
+      description: Optional thumbnail URL for display in the card.
+      required: false
+      example: "https://example.com/cover.jpg"
+      selector:
+        text:

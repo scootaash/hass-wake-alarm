@@ -35,8 +35,6 @@ from typing import TYPE_CHECKING
 from homeassistant.components.media_player import MediaPlayerEntityFeature
 
 from .const import (
-    CONF_MEDIA_CONTENT_ID,
-    CONF_MEDIA_CONTENT_TYPE,
     CONF_MEDIA_PLAYER_ENTITIES,
     DEFAULT_MUSIC_FADE_SEC,
     DEFAULT_VOLUME,
@@ -71,16 +69,17 @@ async def async_run_music_sequence(
         )
         return
 
-    media_content_id: str = coordinator.entry.data.get(CONF_MEDIA_CONTENT_ID, "")
-    media_content_type: str = coordinator.entry.data.get(
-        CONF_MEDIA_CONTENT_TYPE, ""
-    )
-    if not media_content_id or not media_content_type:
+    selection = coordinator.current_media()
+    if selection is None:
+        # The coordinator gates on this in _async_start_music; this is just
+        # a defensive guard if the sequence is invoked another way.
         _LOGGER.warning(
-            "no media content configured for %s; skipping music",
+            "no media selected for %s; skipping music sequence",
             coordinator.slug,
         )
         return
+    media_content_id: str = selection["content_id"]
+    media_content_type: str = selection["content_type"]
 
     target_volume = float(coordinator.read_number("volume", DEFAULT_VOLUME))
     fade_sec = int(coordinator.read_number("music_fade_sec", DEFAULT_MUSIC_FADE_SEC))
