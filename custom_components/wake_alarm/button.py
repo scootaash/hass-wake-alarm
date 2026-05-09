@@ -20,6 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 _ACTIONS: tuple[tuple[str, str], ...] = (
     ("test_light_ramp", "async_test_light_ramp"),
     ("cancel_ramp", "async_cancel_ramp"),
+    ("test_music", "async_test_music"),
 )
 
 

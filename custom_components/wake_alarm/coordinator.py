@@ -43,6 +43,7 @@ from .const import (
     STATE_SNOOZING,
 )
 from .light_ramp import async_run_light_ramp
+from .music_sequence import async_run_music_sequence
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,6 +74,10 @@ class WakeAlarmCoordinator:
         # Ramp task and cancel signal
         self._ramp_task: asyncio.Task | None = None
         self._ramp_cancel_event: asyncio.Event | None = None
+
+        # Music task and cancel signal
+        self._music_task: asyncio.Task | None = None
+        self._music_cancel_event: asyncio.Event | None = None
 
     # -------------------- public state --------------------
 
@@ -143,11 +148,15 @@ class WakeAlarmCoordinator:
         if self._cancel_schedule is not None:
             self._cancel_schedule()
             self._cancel_schedule = None
-        # Cancel any in-flight ramp
+        # Cancel any in-flight ramp / music
         if self._ramp_cancel_event is not None:
             self._ramp_cancel_event.set()
         if self._ramp_task is not None and not self._ramp_task.done():
             self._ramp_task.cancel()
+        if self._music_cancel_event is not None:
+            self._music_cancel_event.set()
+        if self._music_task is not None and not self._music_task.done():
+            self._music_task.cancel()
 
     # -------------------- scheduling --------------------
 
@@ -257,6 +266,44 @@ class WakeAlarmCoordinator:
             # Only revert to IDLE here; later steps will decide whether to
             # transition to PLAYING based on whether music is starting.
             if self._state == STATE_RAMPING:
+                self._set_state(end_state)
+
+    # -------------------- music sequence --------------------
+
+    async def async_test_music(self) -> None:
+        """User-pressed test-music button: run the sequence standalone."""
+        if self._state != STATE_IDLE:
+            _LOGGER.warning(
+                "test_music ignored for %s: state=%s",
+                self.slug,
+                self._state,
+            )
+            return
+        await self._async_start_music(end_state=STATE_IDLE)
+
+    async def _async_start_music(self, *, end_state: str) -> None:
+        if self._music_task is not None and not self._music_task.done():
+            _LOGGER.debug(
+                "music already running for %s; skipping start", self.slug
+            )
+            return
+        self._set_state(STATE_PLAYING)
+        self._music_cancel_event = asyncio.Event()
+        self._music_task = self.hass.async_create_task(
+            self._music_runner(end_state)
+        )
+
+    async def _music_runner(self, end_state: str) -> None:
+        try:
+            await async_run_music_sequence(self, self._music_cancel_event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("music for %s failed", self.slug)
+        finally:
+            self._music_task = None
+            self._music_cancel_event = None
+            if self._state == STATE_PLAYING:
                 self._set_state(end_state)
 
     # -------------------- override detection --------------------
