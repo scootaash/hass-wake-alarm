@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Node / TypeScript
+node_modules/
+*.log
+.npm/
+
+# HA dev artifacts
+.storage/
+home-assistant.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
