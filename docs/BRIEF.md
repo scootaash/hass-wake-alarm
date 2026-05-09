@@ -98,8 +98,10 @@ Stored in `config_entry.data` (changed only via Options Flow):
 - `slug`: derived from name, used in entity IDs
 - `light_entities`: list of `light.*` entity IDs (one or more)
 - `media_player_entities`: list of `media_player.*` entity IDs (one or more if all support GROUPING and share the same source integration)
-- `media_content_id`: string for `media_player.play_media`
-- `media_content_type`: string for `media_player.play_media` (e.g. `favorite_item_id` for Sonos with value like `FV:2/5`, `playlist`, `music`, `url`)
+- `media_content_id`: string for `media_player.play_media`. Set post-config via the card's media browser, not in the config flow. Empty until the user picks media.
+- `media_content_type`: string for `media_player.play_media`. Set post-config via the card's media browser. Empty until the user picks media.
+- `media_label`: friendly title of the selected media (e.g. "Morning Wake Up Mix"). Set alongside `media_content_id`.
+- `media_thumbnail`: optional thumbnail URL for the selected media. Set alongside `media_content_id`.
 - `person_entity`: optional `person.*` entity ID for presence guard
 - `notify_target_standard`: optional `notify.*` service for the standard alarm notification
 - `notify_target_urgent`: optional `notify.*` service for the player-unavailable fallback notification
@@ -113,12 +115,13 @@ Setup wizard steps:
 1. **Name**: text input for a friendly name (e.g. "Master Bedroom Weekdays"). Slug auto-generated from this.
 2. **Lights**: multi-select entity selector filtered to `light` domain.
 3. **Media players**: multi-select entity selector filtered to `media_player` domain. Validation: if more than one is selected, all must originate from the same integration AND advertise `MediaPlayerEntityFeature.GROUPING`. Reject with a clear error otherwise, naming the incompatible players.
-4. **Media content**: text input for `media_content_id` plus dropdown for `media_content_type`. Help text covers common values: Sonos `favorite_item_id` (`FV:2/5` format), Spotify `spotify:playlist:...`, generic stream `url`.
-5. **Person presence (optional)**: entity selector filtered to `person` domain. Blank skips the presence check entirely.
-6. **Notification targets (optional)**: two `notify.*` service dropdowns (standard, urgent). Can be the same service.
-7. **Confirm**: summary of choices.
+4. **Person presence (optional)**: entity selector filtered to `person` domain. Blank skips the presence check entirely.
+5. **Notification targets (optional)**: two `notify.*` service dropdowns (standard, urgent). Can be the same service.
+6. **Confirm**: summary of choices.
 
-The Options Flow re-runs the same steps for editing existing instances.
+Media content selection is **not** part of the config flow. After setup, the user opens the card's settings view and uses the media browser to pick what to play (see Custom Lovelace Card section). Until media is picked, the alarm fires lights only and triggers the urgent notification path at music time.
+
+The Options Flow re-runs the same steps for editing existing instances. Media selection is changed via the card, not the options flow.
 
 ### Entities created per config entry
 
@@ -153,6 +156,7 @@ All entity IDs follow the pattern `<platform>.<slug>_<purpose>`. Entity friendly
 
 - `sensor.<slug>_next_alarm`: next scheduled alarm time (timestamp `device_class`)
 - `sensor.<slug>_state`: enum string, one of `idle`, `ramping`, `playing`, `snoozing`
+- `sensor.<slug>_media_selection`: state is the friendly title of the user-picked media (e.g. "Morning Wake Up Mix"), or `none` if nothing is picked. Attributes: `media_content_id`, `media_content_type`, `thumbnail`. Read-only; written to by the `wake_alarm.set_media` service.
 - `binary_sensor.<slug>_active`: true while a sequence is running (any state other than `idle`)
 
 ### Coordinator and trigger logic
@@ -191,6 +195,8 @@ Initial state: lights set to 1% brightness at `start_kelvin` at ramp start. Ligh
 **User override detection:** every `light.turn_on` call uses a fresh `Context` object created by the integration. The coordinator subscribes to `state_changed` events for the configured lights. When a state change fires with a `context.id` not in the integration's recently-issued context set (sliding window of last 50 contexts, max age 60 seconds), treat it as a user override. End the ramp immediately and transition through to either `playing` (if alarm time passed) or `idle`. Music is unaffected.
 
 ### Music sequence algorithm
+
+**Precondition**: if `media_content_id` is empty (user has not yet picked media via the card), skip the music sequence entirely, send the urgent notification with message "Lights are on but no media is configured. Open the alarm card to pick what to play." Lights continue ramping to completion as normal.
 
 Two paths.
 
@@ -270,6 +276,7 @@ All accept a `target` (entity_id of any of the integration's button entities, us
 - `wake_alarm.cancel_ramp`: stop light ramp without dismissing
 - `wake_alarm.test_light_ramp`: run ramp now (test)
 - `wake_alarm.test_music`: run music sequence now (test)
+- `wake_alarm.set_media`: persist a media selection. Data fields: `media_content_id` (string, required), `media_content_type` (string, required), `title` (string, required), `thumbnail` (string, optional). Updates the config entry options and refreshes `sensor.<slug>_media_selection`. Called by the card after the user picks via the media browser.
 
 ### Person presence behaviour
 
@@ -337,7 +344,8 @@ Mirrors the second and third attached screenshots:
 - Cancel Ramp button: visible only when `sensor.<slug>_state == "ramping"`. Calls `button.<slug>_cancel_ramp`.
 - Test Music button: calls `button.<slug>_test_music`
 - Alarm Volume (0-1) slider: `number.<slug>_volume`
-- Targets & Audio section: read-only display of person, lights, media players, media_content_id, media_content_type, with an "Edit" link that opens the Options Flow (deep-link to Settings → Devices & Services → this config entry → Configure)
+- **Media picker section**: shows the current selection from `sensor.<slug>_media_selection`. If state is `none`, displays "No media picked. Tap to choose." If a selection exists, shows the friendly title and thumbnail (from the sensor's attributes). Tap opens a modal containing HA's built-in `<ha-media-player-browse>` Lit web component, scoped to the first entity in the alarm's `media_player_entities`. The component calls the `media_player/browse_media` WebSocket command natively. When the user picks a playable item, the card calls the `wake_alarm.set_media` service with `media_content_id`, `media_content_type`, `title`, and `thumbnail` from the picked item, then closes the modal. The sensor reflects the new state immediately.
+- Targets section: read-only display of person, lights, media players, with an "Edit" link that opens the Options Flow (deep-link to Settings → Devices & Services → this config entry → Configure)
 
 ### Card editor
 
