@@ -1,0 +1,207 @@
+# Wake Alarm: Legacy Lovelace Card Reference
+#
+# This is the pre-integration Lovelace card YAML for the wake_alarm dashboard.
+# Preserved here as visual and structural reference for the new TypeScript
+# Lovelace card that ships with the integration.
+#
+# This is the MAIN view only. The Settings view (sliders for length, kelvin,
+# brightness, volume, snooze, plus the target entity input fields) is not
+# captured in this YAML; refer to the screenshots in the brief for that layout.
+#
+# DO NOT add this to your dashboard alongside the integration. The entity IDs
+# referenced here (input_select.alarm_mode, input_datetime.alarm_time,
+# input_boolean.daily_*) will not exist once the integration replaces them
+# with switch.<slug>_*, time.<slug>_*, etc.
+#
+# What to study from this file when building the new card:
+#
+#   1. Bubble Card popup pattern: hash-routed popups (#alarm and
+#      #alarm-settings) for the main view and the cog-driven settings
+#      sub-view. Sub-button on the header navigates between them.
+#
+#   2. Mushroom chips layout for day-of-week toggles, with template icon
+#      (mdi:check-circle / mdi:close) and icon_color driven by the toggle
+#      state. Tap action toggles the underlying input_boolean.
+#
+#   3. Visibility condition on the day chips: only shown when alarm mode is
+#      Daily. New card should similarly only show day toggles when the
+#      master enable switch is on (or always show but greyed when off,
+#      designer's call).
+#
+#   4. Time picker via custom:time-picker-card with 24-hour mode and
+#      seconds hidden.
+#
+#   5. Button-card state-driven styling for the alarm mode card (different
+#      icon and background colour per Off/Daily/One-off state). The new
+#      card does similar state-driven visuals for the
+#      idle/ramping/playing/snoozing states from sensor.<slug>_state.
+#
+# What does NOT carry over to the new card:
+#
+#   * The Off/Daily/One-off alarm mode toggle. Replaced by a master enable
+#     switch entity in the integration; the card just renders the switch.
+#   * The cycle-through tap action (input_select.select_next). Replaced by
+#     a simple boolean toggle on the switch entity.
+#   * Bubble Card popup mechanic. The new TypeScript card owns its own
+#     view state internally (main view to settings view and back) without
+#     requiring Bubble Card or any other HACS frontend dependency.
+#   * Mushroom chips, button-card, and time-picker-card dependencies. The
+#     new card implements equivalents natively in Lit.
+#
+###############################################################################
+# CARD: MAIN VIEW
+###############################################################################
+
+type: vertical-stack
+cards:
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#alarm"
+    button_type: name
+    name: Alarm
+    icon: mdi:alarm
+    sub_button:
+      - tap_action:
+          action: navigate
+          navigation_path: "#alarm-settings"
+        icon: mdi:cog
+  - type: custom:button-card
+    entity: input_select.alarm_mode
+    name: Alarm Mode
+    icon: mdi:alarm
+    show_name: true
+    show_state: true
+    layout: vertical
+    tap_action:
+      action: call-service
+      service: input_select.select_next
+      service_data:
+        entity_id: input_select.alarm_mode
+    styles:
+      card:
+        - border-radius: 12px
+        - padding: 12px
+        - box-shadow: var(--ha-card-box-shadow)
+        - background: var(--ha-card-background)
+      name:
+        - font-size: 14px
+      state:
+        - font-size: 12px
+        - text-transform: capitalize
+      icon:
+        - width: 36px
+        - height: 36px
+    state:
+      - value: "Off"
+        icon: mdi:alarm-off
+        styles:
+          icon:
+            - color: var(--disabled-text-color)
+          card:
+            - background: var(--ha-card-background)
+      - value: Daily
+        icon: mdi:alarm
+        styles:
+          icon:
+            - color: var(--primary-color)
+          card:
+            - background: rgba(var(--rgb-primary-color), 0.12)
+      - value: One-off
+        icon: mdi:alarm-light
+        styles:
+          icon:
+            - color: rgb(255, 82, 82)
+          card:
+            - background: rgba(255, 82, 82, 0.12)
+  - type: custom:time-picker-card
+    entity: input_datetime.alarm_time
+    name: Alarm Time
+    hour_mode: 24
+    hide:
+      seconds: true
+      name: false
+      icon: true
+  - type: custom:mushroom-chips-card
+    alignment: center
+    visibility:
+      - condition: state
+        entity: input_select.alarm_mode
+        state: Daily
+    chips:
+      - type: template
+        entity: input_boolean.daily_alarm_mon
+        content: Mon
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_mon','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_mon','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_tue
+        content: Tue
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_tue','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_tue','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_wed
+        content: Wed
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_wed','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_wed','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_thu
+        content: Thu
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_thu','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_thu','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_fri
+        content: Fri
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_fri','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_fri','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_sat
+        content: Sat
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_sat','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_sat','on') else
+          'black' }}
+        tap_action:
+          action: toggle
+      - type: template
+        entity: input_boolean.daily_alarm_sun
+        content: Sun
+        icon: >-
+          {{ 'mdi:check-circle' if
+          is_state('input_boolean.daily_alarm_sun','on') else 'mdi:close' }}
+        icon_color: >-
+          {{ 'green' if is_state('input_boolean.daily_alarm_sun','on') else
+          'black' }}
+        tap_action:
+          action: toggle
