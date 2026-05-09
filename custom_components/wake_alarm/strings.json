@@ -1,0 +1,95 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wake Alarm",
+        "description": "Give this alarm instance a name. Used as a prefix for all entity IDs.",
+        "data": { "name": "Name" }
+      },
+      "lights": {
+        "title": "Lights",
+        "description": "Pick the lights that ramp during the wake-up sequence.",
+        "data": { "light_entities": "Lights" }
+      },
+      "media_players": {
+        "title": "Media players",
+        "description": "Pick speakers for music playback. To select multiple, all must come from the same integration AND support synchronised group playback.",
+        "data": { "media_player_entities": "Media players" }
+      },
+      "media_content": {
+        "title": "Media content",
+        "description": "What to play. For Sonos favourites use favorite_item_id with a value like FV:2/5. For Spotify use playlist with a URI like spotify:playlist:.... For a stream use url.",
+        "data": {
+          "media_content_id": "Media content ID",
+          "media_content_type": "Media content type"
+        }
+      },
+      "presence": {
+        "title": "Presence (optional)",
+        "description": "If set, the alarm only fires when this person is home. Leave blank to skip the presence check.",
+        "data": { "person_entity": "Person" }
+      },
+      "notifications": {
+        "title": "Notifications (optional)",
+        "description": "Mobile notification targets. Standard fires at alarm time. Urgent fires only if any speaker is unavailable.",
+        "data": {
+          "notify_target_standard": "Standard notify service",
+          "notify_target_urgent": "Urgent notify service"
+        }
+      },
+      "confirm": {
+        "title": "Confirm",
+        "description": "About to create the alarm with these settings:\n\n{summary}"
+      }
+    },
+    "error": {
+      "invalid_name": "Name must contain at least one alphanumeric character.",
+      "no_grouping_support": "These media players don't support synchronised group playback: {players}",
+      "mixed_platforms": "Selected media players come from different integrations: {platforms}. Pick players from one integration only.",
+      "media_player_unavailable": "These media players are unavailable: {players}"
+    },
+    "abort": {
+      "already_configured": "An alarm with this name already exists."
+    }
+  },
+  "options": {
+    "step": {
+      "lights": {
+        "title": "Lights",
+        "data": { "light_entities": "Lights" }
+      },
+      "media_players": {
+        "title": "Media players",
+        "data": { "media_player_entities": "Media players" }
+      },
+      "media_content": {
+        "title": "Media content",
+        "data": {
+          "media_content_id": "Media content ID",
+          "media_content_type": "Media content type"
+        }
+      },
+      "presence": {
+        "title": "Presence",
+        "data": { "person_entity": "Person" }
+      },
+      "notifications": {
+        "title": "Notifications",
+        "data": {
+          "notify_target_standard": "Standard notify service",
+          "notify_target_urgent": "Urgent notify service"
+        }
+      }
+    },
+    "error": {
+      "no_grouping_support": "These media players don't support synchronised group playback: {players}",
+      "mixed_platforms": "Selected media players come from different integrations: {platforms}",
+      "media_player_unavailable": "These media players are unavailable: {players}"
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": { "name": "Enabled" }
+    }
+  }
+}
