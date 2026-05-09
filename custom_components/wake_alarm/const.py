@@ -11,6 +11,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
 ]
 
 # Config entry data keys (CONF_NAME comes from homeassistant.const)

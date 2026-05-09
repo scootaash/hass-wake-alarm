@@ -1,17 +1,31 @@
-"""Wake Alarm coordinator: state machine + scheduling.
+"""Wake Alarm coordinator: state machine + scheduling + light ramp.
 
 Owns the next-fire computation and the async_track_point_in_time callback.
 Recomputes whenever any dependency entity (master enable, time, day toggles,
 length) changes state. No minute-pattern polling.
+
+Also owns context tracking for user-override detection: every light service
+call this coordinator emits goes through async_call_light_turn_on, which tags
+the call with a tracked Context. State changes for configured lights that
+arrive with an unknown context.id while ramping are treated as user overrides
+and end the ramp.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections import OrderedDict
 from datetime import datetime, time as dt_time, timedelta
 from typing import Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    Context,
+    Event,
+    HomeAssistant,
+    callback,
+)
 from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_state_change_event,
@@ -19,6 +33,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_LIGHT_ENTITIES,
     CONF_SLUG,
     DAYS,
     DEFAULT_LENGTH_MIN,
@@ -27,8 +42,13 @@ from .const import (
     STATE_RAMPING,
     STATE_SNOOZING,
 )
+from .light_ramp import async_run_light_ramp
 
 _LOGGER = logging.getLogger(__name__)
+
+# Context tracking window for user-override detection
+_CTX_MAX_AGE_SEC = 60
+_CTX_MAX_ENTRIES = 50
 
 
 class WakeAlarmCoordinator:
@@ -46,6 +66,13 @@ class WakeAlarmCoordinator:
         self._cancel_schedule: CALLBACK_TYPE | None = None
         self._cancel_listeners: list[CALLBACK_TYPE] = []
         self._update_callbacks: list[Callable[[], None]] = []
+
+        # User-override detection
+        self._issued_contexts: OrderedDict[str, datetime] = OrderedDict()
+
+        # Ramp task and cancel signal
+        self._ramp_task: asyncio.Task | None = None
+        self._ramp_cancel_event: asyncio.Event | None = None
 
     # -------------------- public state --------------------
 
@@ -96,6 +123,17 @@ class WakeAlarmCoordinator:
                 self.hass, watched, self._async_on_dependency_change
             )
         )
+
+        light_entities = list(self.entry.data.get(CONF_LIGHT_ENTITIES) or [])
+        if light_entities:
+            self._cancel_listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    light_entities,
+                    self._async_on_light_state_change,
+                )
+            )
+
         self.async_recompute_schedule()
 
     async def async_unload(self) -> None:
@@ -105,6 +143,11 @@ class WakeAlarmCoordinator:
         if self._cancel_schedule is not None:
             self._cancel_schedule()
             self._cancel_schedule = None
+        # Cancel any in-flight ramp
+        if self._ramp_cancel_event is not None:
+            self._ramp_cancel_event.set()
+        if self._ramp_task is not None and not self._ramp_task.done():
+            self._ramp_task.cancel()
 
     # -------------------- scheduling --------------------
 
@@ -124,12 +167,9 @@ class WakeAlarmCoordinator:
         self._next_ramp_start = None
 
         if next_fire is not None:
-            length_min = int(self._read_number("length_min", DEFAULT_LENGTH_MIN))
+            length_min = int(self.read_number("length_min", DEFAULT_LENGTH_MIN))
             ramp_start = next_fire - timedelta(minutes=length_min)
             self._next_ramp_start = ramp_start
-            # Aim at ramp_start; async_track_point_in_time fires immediately
-            # if it has passed (e.g. mid-cycle restart), which is acceptable
-            # given the brief's clean-slate restart policy.
             self._cancel_schedule = async_track_point_in_time(
                 self.hass, self._async_on_fire, ramp_start
             )
@@ -162,17 +202,125 @@ class WakeAlarmCoordinator:
     # -------------------- fire callback (stub for now) --------------------
 
     async def _async_on_fire(self, _now: datetime) -> None:
-        """Fire callback. Real ramp/music wiring lands in steps 4 and 5."""
+        """Fire callback. Real ramp/music wiring lands in step 5."""
         self._cancel_schedule = None
         if not self._read_enabled():
             self.async_recompute_schedule()
             return
-        # TODO step 4-5: presence check, light ramp, music sequence, etc.
-        # For step 3 we just bounce through ramping → idle and reschedule
-        # so sensor.next_alarm rolls over to the following day.
+        # TODO step 5: presence check, light ramp + music sequence.
+        # For step 4 we just bounce so the schedule rolls forward.
         self._set_state(STATE_RAMPING)
         self._set_state(STATE_IDLE)
         self.async_recompute_schedule()
+
+    # -------------------- light ramp --------------------
+
+    async def async_test_light_ramp(self) -> None:
+        """User-pressed test-ramp button: run the ramp standalone."""
+        if self._state != STATE_IDLE:
+            _LOGGER.warning(
+                "test_light_ramp ignored for %s: state=%s",
+                self.slug,
+                self._state,
+            )
+            return
+        await self._async_start_ramp(end_state=STATE_IDLE)
+
+    async def async_cancel_ramp(self) -> None:
+        """Stop the ramp without touching music."""
+        if self._ramp_cancel_event is not None:
+            self._ramp_cancel_event.set()
+
+    async def _async_start_ramp(self, *, end_state: str) -> None:
+        """Kick off the ramp loop as a background task."""
+        if self._ramp_task is not None and not self._ramp_task.done():
+            _LOGGER.debug(
+                "ramp already running for %s; skipping start", self.slug
+            )
+            return
+        self._set_state(STATE_RAMPING)
+        self._ramp_cancel_event = asyncio.Event()
+        self._ramp_task = self.hass.async_create_task(
+            self._ramp_runner(end_state)
+        )
+
+    async def _ramp_runner(self, end_state: str) -> None:
+        try:
+            await async_run_light_ramp(self, self._ramp_cancel_event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("ramp for %s failed", self.slug)
+        finally:
+            self._ramp_task = None
+            self._ramp_cancel_event = None
+            # Only revert to IDLE here; later steps will decide whether to
+            # transition to PLAYING based on whether music is starting.
+            if self._state == STATE_RAMPING:
+                self._set_state(end_state)
+
+    # -------------------- override detection --------------------
+
+    def async_call_light_turn_on(
+        self,
+        entity_ids: list[str],
+        *,
+        brightness_pct: int,
+        kelvin: int,
+    ):
+        """Issue a tagged light.turn_on. Returns the awaitable from services.async_call.
+
+        The Context is tracked so the light state listener can distinguish our
+        own changes from user overrides.
+        """
+        ctx = Context()
+        self._track_context(ctx)
+        return self.hass.services.async_call(
+            "light",
+            "turn_on",
+            {
+                "entity_id": entity_ids,
+                "brightness_pct": brightness_pct,
+                "color_temp_kelvin": kelvin,
+            },
+            blocking=False,
+            context=ctx,
+        )
+
+    @callback
+    def _async_on_light_state_change(self, event: Event) -> None:
+        """End the ramp on the first state change we did not cause."""
+        if self._state != STATE_RAMPING:
+            return
+        ctx = event.context
+        ctx_id = getattr(ctx, "id", None)
+        self._prune_issued_contexts()
+        if ctx_id is not None and ctx_id in self._issued_contexts:
+            return
+        _LOGGER.info(
+            "user override detected for %s (entity=%s ctx=%s); ending ramp",
+            self.slug,
+            event.data.get("entity_id"),
+            ctx_id,
+        )
+        if self._ramp_cancel_event is not None:
+            self._ramp_cancel_event.set()
+
+    def _track_context(self, context: Context) -> None:
+        self._issued_contexts[context.id] = dt_util.utcnow()
+        self._issued_contexts.move_to_end(context.id)
+        self._prune_issued_contexts()
+
+    def _prune_issued_contexts(self) -> None:
+        cutoff = dt_util.utcnow() - timedelta(seconds=_CTX_MAX_AGE_SEC)
+        while self._issued_contexts:
+            oldest_id = next(iter(self._issued_contexts))
+            if self._issued_contexts[oldest_id] < cutoff:
+                self._issued_contexts.popitem(last=False)
+            else:
+                break
+        while len(self._issued_contexts) > _CTX_MAX_ENTRIES:
+            self._issued_contexts.popitem(last=False)
 
     # -------------------- state machine --------------------
 
@@ -213,7 +361,8 @@ class WakeAlarmCoordinator:
                 result.add(idx)
         return result
 
-    def _read_number(self, key: str, default: float) -> float:
+    def read_number(self, key: str, default: float) -> float:
+        """Public so light_ramp / music_sequence can pull config values."""
         st = self.hass.states.get(f"number.{self.slug}_{key}")
         if st is None or st.state in (None, "unknown", "unavailable", ""):
             return default

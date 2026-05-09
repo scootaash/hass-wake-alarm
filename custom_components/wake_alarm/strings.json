@@ -126,6 +126,13 @@
     },
     "binary_sensor": {
       "active": { "name": "Active" }
+    },
+    "button": {
+      "test_light_ramp": { "name": "Test light ramp" },
+      "cancel_ramp": { "name": "Cancel ramp" },
+      "test_music": { "name": "Test music" },
+      "dismiss": { "name": "Dismiss" },
+      "snooze": { "name": "Snooze" }
     }
   }
 }
