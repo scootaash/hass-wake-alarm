@@ -46,7 +46,8 @@ wake-alarm/
   docs/
     install.md
     config.md
-    legacy_yaml_reference.yaml  # Existing YAML, kept as algorithmic reference
+    legacy_yaml_reference.yaml  # Pre-integration YAML, kept as algorithmic reference
+    legacy_card_reference.yaml  # Pre-integration Lovelace card, kept as visual reference
     examples/
   hacs.json
   README.md
@@ -58,13 +59,24 @@ The repo serves both HACS categories. Users add the URL twice in HACS: once unde
 
 ## Reference Implementation
 
-The existing YAML package (provided as `docs/legacy_yaml_reference.yaml`) is the algorithmic source of truth for:
+Two reference files in `docs/` capture the pre-integration implementation. Read both before building.
+
+**`docs/legacy_yaml_reference.yaml`** is the algorithmic source of truth for:
 
 - Stepped light ramp math (20 steps per minute, brightness and Kelvin interpolation, current-state clamp to prevent dimming)
 - Sonos sequence quirks (UPnP 800 mitigation via 3-second post-unjoin delay, volume-clamping before and after `play_media` because favourites can restore their own volume, 5-second post-play delay before fade)
 - Linear volume fade from 0 to target over a configurable duration
 
-Read the YAML before implementing those subsystems. Port the logic to async Python, do not reinvent.
+Port the logic to async Python, do not reinvent.
+
+**`docs/legacy_card_reference.yaml`** is the visual and structural reference for the new TypeScript Lovelace card. Study it for:
+
+- The Bubble Card popup pattern with hash routing between main and settings views
+- The Mushroom chips layout for day-of-week toggles with state-driven icon and colour
+- The time picker structure (24-hour, seconds hidden)
+- The button-card state-driven styling pattern (different visuals per alarm state)
+
+The new card should implement equivalents natively in Lit without depending on Bubble Card, Mushroom, button-card, or time-picker-card. The screenshots referenced in the Custom Lovelace Card section remain the visual source of truth for the settings sub-view (which the legacy card YAML does not include).
 
 ## Custom Integration
 
