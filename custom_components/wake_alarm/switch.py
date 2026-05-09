@@ -1,4 +1,4 @@
-"""Wake Alarm switch entities."""
+"""Wake Alarm switch entities (master enable + 7 day-of-week toggles)."""
 from __future__ import annotations
 
 from typing import Any
@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .const import DAYS, DEFAULT_DAYS_ON
 from .entity import WakeAlarmEntity
 
 
@@ -17,18 +18,23 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the master enable switch for this alarm instance."""
-    async_add_entities([WakeAlarmEnabledSwitch(entry)])
+    entities: list[SwitchEntity] = [WakeAlarmEnabledSwitch(entry)]
+    entities.extend(
+        WakeAlarmDaySwitch(entry, day, default_on=day in DEFAULT_DAYS_ON)
+        for day in DAYS
+    )
+    async_add_entities(entities)
 
 
-class WakeAlarmEnabledSwitch(WakeAlarmEntity, SwitchEntity, RestoreEntity):
-    """Master enable switch (default off, persists across restarts)."""
+class _RestorableSwitch(WakeAlarmEntity, SwitchEntity, RestoreEntity):
+    """Common restore-on-startup boolean switch."""
 
-    _attr_translation_key = "enabled"
-
-    def __init__(self, entry: ConfigEntry) -> None:
-        super().__init__(entry, key="enabled", platform="switch")
-        self._attr_is_on = False
+    def __init__(
+        self, entry: ConfigEntry, key: str, default_on: bool = False
+    ) -> None:
+        super().__init__(entry, key=key, platform="switch")
+        self._default_on = default_on
+        self._attr_is_on = default_on
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -43,3 +49,20 @@ class WakeAlarmEnabledSwitch(WakeAlarmEntity, SwitchEntity, RestoreEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._attr_is_on = False
         self.async_write_ha_state()
+
+
+class WakeAlarmEnabledSwitch(_RestorableSwitch):
+    """Master enable switch (default off)."""
+
+    _attr_translation_key = "enabled"
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        super().__init__(entry, key="enabled", default_on=False)
+
+
+class WakeAlarmDaySwitch(_RestorableSwitch):
+    """Day-of-week toggle (Mon–Fri default on, Sat/Sun default off)."""
+
+    def __init__(self, entry: ConfigEntry, day: str, default_on: bool) -> None:
+        super().__init__(entry, key=day, default_on=default_on)
+        self._attr_translation_key = day

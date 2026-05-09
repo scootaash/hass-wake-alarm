@@ -5,7 +5,11 @@ from homeassistant.const import Platform
 
 DOMAIN = "wake_alarm"
 
-PLATFORMS: list[Platform] = [Platform.SWITCH]
+PLATFORMS: list[Platform] = [
+    Platform.SWITCH,
+    Platform.TIME,
+    Platform.NUMBER,
+]
 
 # Config entry data keys (CONF_NAME comes from homeassistant.const)
 CONF_SLUG = "slug"
