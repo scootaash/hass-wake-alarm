@@ -36,8 +36,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if data is not None:
             coordinator: WakeAlarmCoordinator = data["coordinator"]
             await coordinator.async_unload()
-        # Drop services once the last entry is gone.
-        if not hass.data[DOMAIN]:
+        # Drop services + the global action listener once the last entry
+        # is gone. Internal keys (prefixed with "_") are bookkeeping for
+        # async_setup_services itself.
+        domain_data = hass.data.get(DOMAIN, {})
+        if not any(not k.startswith("_") for k in domain_data):
             async_unload_services(hass)
     return unload_ok
 

@@ -143,6 +143,26 @@
           "description": "Optional thumbnail URL for display in the card."
         }
       }
+    },
+    "snooze": {
+      "name": "Snooze",
+      "description": "Snooze the alarm. Pauses any active music, cancels the ramp, and starts a snooze timer for the configured snooze_min minutes."
+    },
+    "dismiss": {
+      "name": "Dismiss",
+      "description": "Fully dismiss the alarm. Stops music, unjoins any group, cancels every pending task or timer, and recomputes the next fire time."
+    },
+    "cancel_ramp": {
+      "name": "Cancel ramp",
+      "description": "Stop the light ramp without dismissing the alarm. Music will still play at alarm_time."
+    },
+    "test_light_ramp": {
+      "name": "Test light ramp",
+      "description": "Run the light ramp now using current settings, regardless of schedule."
+    },
+    "test_music": {
+      "name": "Test music",
+      "description": "Run the music sequence now using current settings and the selected media."
     }
   }
 }

@@ -42,3 +42,48 @@ set_media:
       example: "https://example.com/cover.jpg"
       selector:
         text:
+
+snooze:
+  name: Snooze
+  description: >
+    Snooze the alarm. Pauses any active music, cancels the ramp, and
+    starts a snooze timer for the configured snooze_min minutes.
+  target:
+    entity:
+      integration: wake_alarm
+
+dismiss:
+  name: Dismiss
+  description: >
+    Fully dismiss the alarm. Stops music, unjoins any group, cancels every
+    pending task or timer, and recomputes the next fire time. Lights are
+    left as the user has them.
+  target:
+    entity:
+      integration: wake_alarm
+
+cancel_ramp:
+  name: Cancel ramp
+  description: >
+    Stop the light ramp without dismissing the alarm. Music will still
+    play at alarm_time.
+  target:
+    entity:
+      integration: wake_alarm
+
+test_light_ramp:
+  name: Test light ramp
+  description: >
+    Run the light ramp now using current settings, regardless of schedule.
+  target:
+    entity:
+      integration: wake_alarm
+
+test_music:
+  name: Test music
+  description: >
+    Run the music sequence now using current settings and the selected
+    media. Aborts with a log warning if no media has been picked.
+  target:
+    entity:
+      integration: wake_alarm
