@@ -1,0 +1,704 @@
+# Wake Alarm: Legacy YAML Reference
+#
+# This file is the pre-integration YAML package that the wake_alarm custom
+# integration replaces. It is preserved here as algorithmic reference material
+# for porting to Python, NOT as a working configuration.
+#
+# DO NOT load this as an HA package alongside the integration. They will
+# conflict on entity IDs and behaviour.
+#
+# Read this file before implementing:
+#
+#   1. The stepped light ramp in scripts.alarm_light_ramp:
+#      * 20 steps per minute
+#      * Brightness and Kelvin interpolated linearly across total_steps
+#      * Current-state clamp so the ramp never dims a light below its
+#        existing brightness (preserves manual user override)
+#
+#   2. The Sonos sequence quirks in scripts.alarm_post_action_music:
+#      * media_player.unjoin BEFORE play_media to clear group state
+#      * 3-second delay after unjoin avoids UPnP Error 800
+#      * volume_set called BEFORE AND AFTER play_media because favourites
+#        can restore their own volume on play
+#      * 5-second delay after play_media before starting the volume fade
+#      * Linear fade from vol_start (0.0) to target_vol over fade_time seconds
+#
+#   3. The next-alarm calculation in template.sensor.next_alarm_time, which
+#      handles day-of-week filtering and midnight crossings.
+#
+# What is intentionally NOT carried over to the integration:
+#
+#   * The Off/Daily/One-off input_select. Replaced with a master enable
+#     switch entity. One-off moves to the v2 backlog.
+#   * The minute-pattern automations. Replaced with async_track_point_in_time
+#     scheduling in the coordinator.
+#   * The pre/main automation split. Unified into a single coordinator-driven
+#     state machine.
+#   * The person-presence inconsistency. The YAML only checks on the pre phase;
+#     the integration applies the check to the whole sequence.
+#   * The hardcoded 60-second music fade and 20-step count. Both become
+#     configurable number entities.
+#
+###############################################################################
+# HELPERS
+###############################################################################
+
+input_datetime:
+  alarm_time:
+    name: alarm_time
+    has_time: true
+    has_date: false
+
+# Created in UI so it saves
+# input_select:
+#   alarm_mode:
+#     name: Alarm Mode
+#     icon: mdi:alarm
+#     options:
+#       - 'Off'
+#       - Daily
+#       - One-off
+#     initial: 'Off'
+
+input_boolean:
+  # Weekday toggles for Daily mode
+  daily_alarm_mon:
+    name: daily_alarm_mon
+  daily_alarm_tue:
+    name: daily_alarm_tue
+  daily_alarm_wed:
+    name: daily_alarm_wed
+  daily_alarm_thu:
+    name: daily_alarm_thu
+  daily_alarm_fri:
+    name: daily_alarm_fri
+  daily_alarm_sat:
+    name: daily_alarm_sat
+  daily_alarm_sun:
+    name: daily_alarm_sun
+
+  # Internal flag: ramp in progress (used for cancel/stop logic)
+  alarm_ramping:
+    name: alarm_ramping
+    icon: mdi:white-balance-sunny
+
+input_text:
+  # Plain text targets (simple & robust)
+  alarm_person_entity:
+    name: alarm_person_entity      # e.g. person.alex (leave blank to ignore presence)
+    max: 255
+  alarm_lights_entity:
+    name: alarm_lights_entity      # e.g. light.bedroom_group
+    max: 255
+  alarm_sonos_player:
+    name: alarm_sonos_player       # e.g. media_player.master_bedroom
+    max: 255
+  alarm_favorite:
+    name: alarm_favorite           # Sonos Favourite (friendly name OR ID like FV:2/3)
+    max: 255
+  alarm_time_entry:
+    name: Alarm Time Entry
+    max: 5
+    pattern: "^[0-2]?[0-9]:[0-5][0-9]$"
+
+input_number:
+  # Sunrise ramp parameters (shared)
+  alarm_start_kelvin:
+    name: alarm_start_kelvin
+    min: 1500
+    max: 6500
+    step: 50
+    unit_of_measurement: K
+  alarm_target_kelvin:
+    name: alarm_target_kelvin
+    min: 1500
+    max: 6500
+    step: 50
+    unit_of_measurement: K
+  alarm_max_brightness_pct:
+    name: alarm_max_brightness_pct
+    min: 1
+    max: 100
+    step: 1
+    unit_of_measurement: '%'
+  alarm_length_min:
+    name: alarm_length_min
+    min: 1
+    max: 120
+    step: 1
+    unit_of_measurement: min
+
+  # Audio
+  alarm_volume_level:
+    name: alarm_volume_level
+    icon: mdi:volume-high
+    min: 0
+    max: 0.2
+    step: 0.01
+
+  # Snooze length
+  alarm_snooze_minutes:
+    name: alarm_snooze_minutes
+    min: 1
+    max: 30
+    step: 1
+    unit_of_measurement: min
+    icon: mdi:alarm-snooze
+
+timer:
+  alarm_snooze:
+    name: alarm_snooze
+
+###############################################################################
+# BINARY SENSORS
+###############################################################################
+
+template:
+  - binary_sensor:
+      - name: alarm_due_soon
+        unique_id: alarm_due_soon
+        state: >-
+          {% set mode_raw = states('input_select.alarm_mode') %}
+          {% set mode = mode_raw|lower|trim %}
+          {% set ent = 'input_datetime.alarm_time' %}
+          {% set t_unavail = states(ent) in ['unknown','unavailable',''] or not state_attr(ent,'has_time') %}
+          {% if mode not in ['daily','one-off'] or t_unavail %}
+            false
+          {% else %}
+            {% set h = (state_attr(ent,'hour') or 0)|int %}
+            {% set m = (state_attr(ent,'minute') or 0)|int %}
+            {% set base = today_at('%02d:%02d:00'|format(h, m)) %}
+            {% set nowts = now() %}
+
+            {% if mode == 'one-off' %}
+              {% set next_dt = base if base > nowts else (base + timedelta(days=1)) %}
+            {% else %}
+              {# enabled weekdays 0..6 Mon..Sun #}
+              {% set en = [] %}
+              {% if is_state('input_boolean.daily_alarm_mon','on') %}{% set en = en + [0] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_tue','on') %}{% set en = en + [1] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_wed','on') %}{% set en = en + [2] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_thu','on') %}{% set en = en + [3] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_fri','on') %}{% set en = en + [4] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_sat','on') %}{% set en = en + [5] %}{% endif %}
+              {% if is_state('input_boolean.daily_alarm_sun','on') %}{% set en = en + [6] %}{% endif %}
+              {% set en = en if en|length > 0 else [0,1,2,3,4,5,6] %}
+
+              {% set ns = namespace(next_dt = none) %}
+              {% for i in range(0,7) %}
+                {% set cand = base + timedelta(days=i) %}
+                {% if (cand.weekday() in en) and (cand > nowts) %}
+                  {% set ns.next_dt = cand %}
+                  {% break %}
+                {% endif %}
+              {% endfor %}
+              {% set next_dt = ns.next_dt %}
+            {% endif %}
+
+            {{ next_dt is not none and 0 <= (next_dt - nowts).total_seconds() <= 86400 }}
+          {% endif %}
+        icon: >-
+          {{ 'mdi:check-circle' if is_state('binary_sensor.alarm_due_soon','on') else 'mdi:alarm-off' }}
+        attributes:
+          next_trigger: >-
+            {% set mode_raw = states('input_select.alarm_mode') %}
+            {% set mode = mode_raw|lower|trim %}
+            {% set ent = 'input_datetime.alarm_time' %}
+            {% set t_unavail = states(ent) in ['unknown','unavailable',''] or not state_attr(ent,'has_time') %}
+            {% if mode not in ['daily','one-off'] or t_unavail %}
+              unknown
+            {% else %}
+              {% set h = (state_attr(ent,'hour') or 0)|int %}
+              {% set m = (state_attr(ent,'minute') or 0)|int %}
+              {% set base = today_at('%02d:%02d:00'|format(h, m)) %}
+              {% set nowts = now() %}
+              {% if mode == 'one-off' %}
+                {{ base if base > nowts else (base + timedelta(days=1)) }}
+              {% else %}
+                {% set en = [] %}
+                {% if is_state('input_boolean.daily_alarm_mon','on') %}{% set en = en + [0] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_tue','on') %}{% set en = en + [1] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_wed','on') %}{% set en = en + [2] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_thu','on') %}{% set en = en + [3] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_fri','on') %}{% set en = en + [4] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_sat','on') %}{% set en = en + [5] %}{% endif %}
+                {% if is_state('input_boolean.daily_alarm_sun','on') %}{% set en = en + [6] %}{% endif %}
+                {% set en = en if en|length > 0 else [0,1,2,3,4,5,6] %}
+                {% set ns = namespace(next_dt = none) %}
+                {% for i in range(0,7) %}
+                  {% set cand = base + timedelta(days=i) %}
+                  {% if (cand.weekday() in en) and (cand > nowts) %}
+                    {% set ns.next_dt = cand %}
+                    {% break %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.next_dt if ns.next_dt is not none else 'unknown' }}
+              {% endif %}
+            {% endif %}
+
+
+      # One-off active mirrors the selected mode
+      - name: oneoff_alarm_active
+        unique_id: oneoff_alarm_active
+        state: "{{ is_state('input_select.alarm_mode', 'One-off') }}"
+        icon: >-
+          {{ 'mdi:calendar-alert' if is_state('binary_sensor.oneoff_alarm_active','on') else 'mdi:calendar-blank' }}
+
+
+
+  - sensor:
+      - name: next_alarm_time
+        unique_id: next_alarm_time
+        device_class: timestamp
+        state: >-
+          {% set mode = states('input_select.alarm_mode') %}
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] or mode == 'Off' %}
+            unknown
+          {% else %}
+            {% set nowts = now() %}
+            {% set base = today_at(t) %}
+            {% if mode == 'One-off' %}
+              {% set ts = as_timestamp(base if base > nowts else (base + timedelta(days=1))) %}
+              {{ ts | timestamp_utc }}
+            {% else %}
+              {# Build candidate timestamps for each enabled weekday (0=Mon..6=Sun) #}
+              {% set wd = nowts.weekday() %}
+              {% set cand_ts = [] %}
+
+              {% if is_state('input_boolean.daily_alarm_mon','on') %}
+                {% set d = (0 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_tue','on') %}
+                {% set d = (1 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_wed','on') %}
+                {% set d = (2 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_thu','on') %}
+                {% set d = (3 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_fri','on') %}
+                {% set d = (4 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_sat','on') %}
+                {% set d = (5 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+              {% if is_state('input_boolean.daily_alarm_sun','on') %}
+                {% set d = (6 - wd) % 7 %}
+                {% set c = base + timedelta(days=d) %}
+                {% set c = c + timedelta(days=7) if c <= nowts else c %}
+                {% set cand_ts = cand_ts + [ as_timestamp(c) ] %}
+              {% endif %}
+
+              {% if cand_ts | length > 0 %}
+                {{ (cand_ts | min) | timestamp_utc }}
+              {% else %}
+                unknown
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          pretty: >-
+            {% set s = this.state %}
+            {{ (as_timestamp(s) | timestamp_local('%a %d %b %H:%M')) if s not in ['unknown','unavailable',''] else 'No upcoming alarm' }}
+          epoch: >-
+            {% set s = this.state %}
+            {{ as_timestamp(s) if s not in ['unknown','unavailable',''] else none }}
+          mode: "{{ states('input_select.alarm_mode') }}"
+
+
+
+###############################################################################
+# SCRIPTS
+###############################################################################
+
+script:
+
+  # Hue-friendly single-phase sunrise. 20 steps/min. Never dims. Stops if:
+  #  - user cancels (alarm_ramping turned off), or
+  #  - current brightness >= target (user manually set full).
+  alarm_light_ramp:
+    alias: alarm_light_ramp
+    mode: restart
+    sequence:
+      # Flag ramp as active
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.alarm_ramping
+
+      # ---- VARIABLES (must be BEFORE any service calls) ----
+      - variables:
+          target_light: "{{ states('input_text.alarm_lights_entity') }}"
+          total_min: "{{ states('input_number.alarm_length_min') | int(1) }}"
+          max_pct: "{{ states('input_number.alarm_max_brightness_pct') | int(100) }}"
+          start_kelvin: "{{ states('input_number.alarm_start_kelvin') | int(2000) }}"
+          target_kelvin: "{{ states('input_number.alarm_target_kelvin') | int(4000) }}"
+          steps_per_min: 20
+          # total steps = minutes × steps/min (>=1)
+          total_steps: >-
+            {% set tm = total_min | int %}
+            {% set spm = steps_per_min | int %}
+            {% set t = tm * spm %}
+            {{ 1 if t < 1 else t }}
+          # seconds per step (ceil) as int
+          per_step_sec: >-
+            {% set spm = steps_per_min | int %}
+            {{ ( (60 / (spm if spm > 0 else 1)) | round(0, 'ceil') | int ) }}
+
+      # Ensure a light is provided
+      - condition: template
+        value_template: "{{ target_light | length > 0 }}"
+
+      # Initial turn-on (dim & warm)
+      - service: light.turn_on
+        target:
+          entity_id: "{{ target_light }}"
+        data:
+          brightness_pct: 1
+          color_temp_kelvin: "{{ start_kelvin | int }}"
+
+      # ---- RAMP LOOP ----
+      - repeat:
+          count: "{{ total_steps }}"
+          sequence:
+            # Stop if user cancelled
+            - choose:
+                - conditions: "{{ is_state('input_boolean.alarm_ramping','off') }}"
+                  sequence:
+                    - stop: "Ramp cancelled"
+              default: []
+
+            # Step calculations (all numeric, idx forced to int)
+            - variables:
+                idx: "{{ (repeat.index | int) - 1 }}"
+                denom: "{{ (total_steps | int) - 1 }}"
+                # brightness step target
+                cur_pct_calc: >-
+                  {% set d = denom | int %}
+                  {% if (total_steps | int) <= 1 %}
+                    {{ max_pct | int }}
+                  {% else %}
+                    {% set inc = ((max_pct | float) - 1.0) / (d if d > 0 else 1.0) %}
+                    {{ (1.0 + (inc * idx)) | round(0) | int }}
+                  {% endif %}
+                # kelvin step target
+                cur_kelvin_calc: >-
+                  {% set d = denom | int %}
+                  {% if (total_steps | int) <= 1 %}
+                    {{ target_kelvin | int }}
+                  {% else %}
+                    {% set inc_k = ((target_kelvin | float) - (start_kelvin | float)) / (d if d > 0 else 1.0) %}
+                    {{ ((start_kelvin | float) + (inc_k * idx)) | round(0) | int }}
+                  {% endif %}
+                # current brightness (0–255 -> % as int)
+                cur_bri_attr: "{{ state_attr(target_light, 'brightness') | int(0) }}"
+                cur_pct_now: "{{ (cur_bri_attr / 2.55) | round(0) | int }}"
+                # never dim below current; clamp 1..100
+                next_pct: >-
+                  {% set np = [cur_pct_calc, cur_pct_now] | max %}
+                  {{ 100 if np > 100 else (1 if np < 1 else np) }}
+                # clamp kelvin to 1500..6500
+                next_kelvin: >-
+                  {% set k = cur_kelvin_calc | int %}
+                  {% if k < 1500 %}1500{% elif k > 6500 %}6500{% else %}{{ k }}{% endif %}
+
+            # Stop early if already at/above target brightness
+            - choose:
+                - conditions: "{{ cur_pct_now >= max_pct }}"
+                  sequence:
+                    - stop: "Ramp reached target (user override)"
+              default: []
+
+            # Apply this step (force ints)
+            - service: light.turn_on
+              target:
+                entity_id: "{{ target_light }}"
+              data:
+                brightness_pct: "{{ next_pct | int }}"
+                color_temp_kelvin: "{{ next_kelvin | int }}"
+
+            # Wait for next step
+            - delay:
+                seconds: "{{ per_step_sec | int }}"
+
+      # Clear ramp flag
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.alarm_ramping
+
+# Set volume and play the Sonos favourite (friendly name OR ID)
+  alarm_post_action_music:
+    alias: alarm_post_action_music
+    mode: restart
+    sequence:
+      - variables:
+          player: "{{ states('input_text.alarm_sonos_player') }}"
+          fav_in: "{{ states('input_text.alarm_favorite') }}"
+          target_vol: "{{ states('input_number.alarm_volume_level') | float(0.4) }}"
+          fade_time: 60       # seconds to ramp volume
+          steps: 20           # number of steps in the fade
+          step_delay: "{{ (fade_time / steps) | int }}"   # seconds per step
+          vol_start: 0.0     # start very quiet to avoid blasts
+          skips: "{{ range(1, 5) | random }}"  # skip 1..4 tracks after starting (randomize)
+
+      # Ensure player + favourite present
+      - condition: template
+        value_template: >-
+          {{ player|length>0 and 'media_player.' in player and fav_in|length>0 }}
+
+      - action: media_player.unjoin
+        target: { entity_id: "{{ player }}" }
+
+      # Wait for Sonos to fully settle after unjoin — skipping this causes UPnP Error 800
+      - delay:
+          seconds: 3
+
+      # 1) Force quiet *before* starting playback
+      - action: media_player.volume_set
+        target: { entity_id: "{{ player }}" }
+        data:
+          volume_level: "{{ vol_start }}"
+
+      # 2) Enable shuffle *before* loading the favourite
+      - action: media_player.shuffle_set
+        target: { entity_id: "{{ player }}" }
+        data:
+          shuffle: true
+
+      # 4) Immediately clamp volume low in case the favourite restores its own volume
+      - action: media_player.volume_set
+        target: { entity_id: "{{ player }}" }
+        data:
+          volume_level: "{{ vol_start }}"
+
+      # 3) Start the favourite (playlist)
+      - action: media_player.play_media
+        target: { entity_id: "{{ player }}" }
+        data:
+          media_content_id: "{{ fav_in }}"
+          media_content_type: favorite_item_id
+          enqueue: replace
+
+      # 5) Give Sonos a moment to start the queue
+      - delay:
+          seconds: 5
+
+      # 7) Fade up to the target volume over fade_time
+      - repeat:
+          count: "{{ steps }}"
+          sequence:
+            - variables:
+                idx: "{{ repeat.index | int }}"
+                v: >-
+                  {# Linear ramp from vol_start to target_vol #}
+                  {% set dv = (target_vol - vol_start) | float %}
+                  {% set s = steps | int %}
+                  {% set val = vol_start + (dv * (idx / (s if s > 0 else 1))) %}
+                  {{ (0 if val < 0 else (1 if val > 1 else val)) | round(2) }}
+            - action: media_player.volume_set
+              target: { entity_id: "{{ player }}" }
+              data:
+                volume_level: "{{ v }}"
+            - delay:
+                seconds: "{{ step_delay }}"
+
+
+  # Snooze: cancel ramp, (optionally) pause media, then start snooze timer
+  alarm_snooze:
+    alias: alarm_snooze
+    mode: restart
+    sequence:
+      - service: input_boolean.turn_off
+        target: { entity_id: input_boolean.alarm_ramping }
+
+      - variables:
+          player: "{{ states('input_text.alarm_sonos_player') }}"
+      - choose:
+          - conditions: "{{ player|length>0 and 'media_player.' in player }}"
+            sequence:
+              - service: media_player.media_pause
+                target: { entity_id: "{{ player }}" }
+        default: []
+
+      # Optional: turn lights off during snooze (uncomment if desired)
+      # - variables:
+      #     light_ent: "{{ states('input_text.alarm_lights_entity') }}"
+      # - choose:
+      #     - conditions: "{{ light_ent|length>0 }}"
+      #       sequence:
+      #         - service: light.turn_off
+      #           target: { entity_id: "{{ light_ent }}" }
+
+      - variables:
+          mins: "{{ states('input_number.alarm_snooze_minutes') | int(5) }}"
+      - service: timer.start
+        target: { entity_id: timer.alarm_snooze }
+        data:
+          duration: "00:{{ '%02d'|format(mins) }}:00"
+
+###############################################################################
+# AUTOMATIONS
+###############################################################################
+
+automation:
+  # DAILY — PRE (lights start alarm_length_min before alarm time)
+  - id: daily_alarm_pre
+    alias: daily_alarm_pre
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      # Daily mode
+      - condition: template
+        value_template: "{{ is_state('input_select.alarm_mode','Daily') }}"
+      # Person (optional) must be home if set
+      - condition: template
+        value_template: >
+          {% set p = states('input_text.alarm_person_entity') %}
+          {{ p|length == 0 or is_state(p,'home') }}
+      # Weekday of the *pre* time must be enabled (handles midnight crossing)
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set off = states('input_number.alarm_length_min')|int(0) %}
+          {% set target = today_at(t) - timedelta(minutes=off) %}
+          {% set w = target.weekday() %}
+          {{ (w==0 and is_state('input_boolean.daily_alarm_mon','on')) or
+            (w==1 and is_state('input_boolean.daily_alarm_tue','on')) or
+            (w==2 and is_state('input_boolean.daily_alarm_wed','on')) or
+            (w==3 and is_state('input_boolean.daily_alarm_thu','on')) or
+            (w==4 and is_state('input_boolean.daily_alarm_fri','on')) or
+            (w==5 and is_state('input_boolean.daily_alarm_sat','on')) or
+            (w==6 and is_state('input_boolean.daily_alarm_sun','on')) }}
+          {% endif %}
+      # Time match now == pre time
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set off = states('input_number.alarm_length_min')|int(0) %}
+          {% set target = today_at(t) - timedelta(minutes=off) %}
+          {{ now().hour == target.hour and now().minute == target.minute }}
+          {% endif %}
+    action:
+      - service: script.alarm_light_ramp
+
+  # DAILY — MAIN (music at alarm time)
+  - id: daily_alarm_main
+    alias: daily_alarm_main
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      # Daily mode
+      - condition: template
+        value_template: "{{ is_state('input_select.alarm_mode','Daily') }}"
+      # Weekday of the alarm time must be enabled
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set dt = today_at(t) %}
+          {% set w = dt.weekday() %}
+          {{ (w==0 and is_state('input_boolean.daily_alarm_mon','on')) or
+            (w==1 and is_state('input_boolean.daily_alarm_tue','on')) or
+            (w==2 and is_state('input_boolean.daily_alarm_wed','on')) or
+            (w==3 and is_state('input_boolean.daily_alarm_thu','on')) or
+            (w==4 and is_state('input_boolean.daily_alarm_fri','on')) or
+            (w==5 and is_state('input_boolean.daily_alarm_sat','on')) or
+            (w==6 and is_state('input_boolean.daily_alarm_sun','on')) }}
+          {% endif %}
+      # Time match now == alarm time
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set dt = today_at(t) %}
+          {{ now().hour == dt.hour and now().minute == dt.minute }}
+          {% endif %}
+    action:
+      - service: script.alarm_post_action_music
+
+  # ONE-OFF — PRE
+  - id: oneoff_alarm_pre
+    alias: oneoff_alarm_pre
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      - condition: template
+        value_template: "{{ is_state('input_select.alarm_mode','One-off') }}"
+      - condition: template
+        value_template: >
+          {% set p = states('input_text.alarm_person_entity') %}
+          {{ p|length == 0 or is_state(p,'home') }}
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set off = states('input_number.alarm_length_min')|int(0) %}
+          {% set target = today_at(t) - timedelta(minutes=off) %}
+          {{ now().hour == target.hour and now().minute == target.minute }}
+          {% endif %}
+    action:
+      - service: script.alarm_light_ramp
+
+  # ONE-OFF — MAIN
+  - id: oneoff_alarm_main
+    alias: oneoff_alarm_main
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      - condition: template
+        value_template: "{{ is_state('input_select.alarm_mode','One-off') }}"
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.alarm_time') %}
+          {% if t in ['unknown','unavailable',''] %} false {% else %}
+          {% set dt = today_at(t) %}
+          {{ now().hour == dt.hour and now().minute == dt.minute }}
+          {% endif %}
+    action:
+      - service: script.alarm_post_action_music
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.alarm_mode
+        data:
+          option: Off
+
+  # SNOOZE FINISHED — replay music
+  - id: alarm_snooze_finished
+    alias: alarm_snooze_finished
+    mode: single
+    trigger:
+      - platform: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.alarm_snooze
+    action:
+      - service: script.alarm_post_action_music
