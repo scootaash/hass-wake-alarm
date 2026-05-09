@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import WakeAlarmCoordinator
+from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    async_setup_services(hass)
     return True
 
 
@@ -33,6 +36,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if data is not None:
             coordinator: WakeAlarmCoordinator = data["coordinator"]
             await coordinator.async_unload()
+        # Drop services once the last entry is gone.
+        if not hass.data[DOMAIN]:
+            async_unload_services(hass)
     return unload_ok
 
 

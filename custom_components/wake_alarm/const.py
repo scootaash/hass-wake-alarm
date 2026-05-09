@@ -18,8 +18,6 @@ PLATFORMS: list[Platform] = [
 CONF_SLUG = "slug"
 CONF_LIGHT_ENTITIES = "light_entities"
 CONF_MEDIA_PLAYER_ENTITIES = "media_player_entities"
-CONF_MEDIA_CONTENT_ID = "media_content_id"
-CONF_MEDIA_CONTENT_TYPE = "media_content_type"
 CONF_PERSON_ENTITY = "person_entity"
 CONF_NOTIFY_TARGET_STANDARD = "notify_target_standard"
 CONF_NOTIFY_TARGET_URGENT = "notify_target_urgent"
@@ -46,10 +44,13 @@ DEFAULT_STEPS_PER_MIN = 20
 DEFAULT_MUSIC_FADE_SEC = 60
 DEFAULT_AUTO_DISMISS_MIN = 0
 
-# Allowed media content types (config flow dropdown)
-MEDIA_CONTENT_TYPES: tuple[str, ...] = (
-    "favorite_item_id",
-    "playlist",
-    "music",
-    "url",
-)
+# Attribute keys on sensor.<slug>_media_selection
+ATTR_MEDIA_CONTENT_ID = "media_content_id"
+ATTR_MEDIA_CONTENT_TYPE = "media_content_type"
+ATTR_MEDIA_THUMBNAIL = "thumbnail"
+
+# Sentinel state for sensor.<slug>_media_selection when nothing is picked.
+MEDIA_STATE_NONE = "none"
+
+# Service names
+SERVICE_SET_MEDIA = "set_media"

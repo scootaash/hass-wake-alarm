@@ -1,7 +1,8 @@
-"""Wake Alarm sensors: next_alarm timestamp + state enum."""
+"""Wake Alarm sensors: next_alarm timestamp, state enum, media selection."""
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -10,9 +11,14 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    ATTR_MEDIA_CONTENT_ID,
+    ATTR_MEDIA_CONTENT_TYPE,
+    ATTR_MEDIA_THUMBNAIL,
     DOMAIN,
+    MEDIA_STATE_NONE,
     STATE_IDLE,
     STATE_PLAYING,
     STATE_RAMPING,
@@ -34,6 +40,7 @@ async def async_setup_entry(
         [
             WakeAlarmNextAlarmSensor(entry, coordinator),
             WakeAlarmStateSensor(entry, coordinator),
+            WakeAlarmMediaSelectionSensor(entry, coordinator),
         ]
     )
 
@@ -87,3 +94,87 @@ class WakeAlarmStateSensor(_CoordinatorSensor):
     @property
     def native_value(self) -> str:
         return self._coordinator.state
+
+
+class WakeAlarmMediaSelectionSensor(WakeAlarmEntity, SensorEntity, RestoreEntity):
+    """Read-only sensor reflecting the user's last media selection.
+
+    Written via the wake_alarm.set_media service. Persistence is via
+    RestoreEntity — selection survives HA restarts without requiring a
+    config-entry reload cycle on every pick.
+
+    State is the friendly title (e.g. "Morning Wake Up Mix") or the literal
+    "none" when nothing is picked. The actual media_content_id /
+    media_content_type / thumbnail are exposed as attributes.
+    """
+
+    _attr_translation_key = "media_selection"
+
+    def __init__(
+        self, entry: ConfigEntry, coordinator: WakeAlarmCoordinator
+    ) -> None:
+        super().__init__(entry, key="media_selection", platform="sensor")
+        self._coordinator = coordinator
+        self._title: str | None = None
+        self._content_id: str | None = None
+        self._content_type: str | None = None
+        self._thumbnail: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (
+            None,
+            "",
+            "unknown",
+            "unavailable",
+            MEDIA_STATE_NONE,
+        ):
+            attrs = last.attributes or {}
+            content_id = attrs.get(ATTR_MEDIA_CONTENT_ID)
+            content_type = attrs.get(ATTR_MEDIA_CONTENT_TYPE)
+            if content_id and content_type:
+                self._title = last.state
+                self._content_id = content_id
+                self._content_type = content_type
+                self._thumbnail = attrs.get(ATTR_MEDIA_THUMBNAIL)
+        self._coordinator.register_media_sensor(self)
+
+    @property
+    def native_value(self) -> str:
+        return self._title if self._title else MEDIA_STATE_NONE
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            ATTR_MEDIA_CONTENT_ID: self._content_id,
+            ATTR_MEDIA_CONTENT_TYPE: self._content_type,
+            ATTR_MEDIA_THUMBNAIL: self._thumbnail,
+        }
+
+    @callback
+    def selection_data(self) -> dict[str, Any] | None:
+        """Returns the current selection or None if nothing usable is picked."""
+        if not self._content_id or not self._content_type:
+            return None
+        return {
+            "content_id": self._content_id,
+            "content_type": self._content_type,
+            "title": self._title or self._content_id,
+            "thumbnail": self._thumbnail,
+        }
+
+    @callback
+    def update_selection(
+        self,
+        *,
+        content_id: str,
+        content_type: str,
+        title: str,
+        thumbnail: str | None,
+    ) -> None:
+        self._content_id = content_id
+        self._content_type = content_type
+        self._title = title
+        self._thumbnail = thumbnail
+        self.async_write_ha_state()

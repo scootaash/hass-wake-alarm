@@ -19,26 +19,13 @@ from homeassistant.util import slugify
 
 from .const import (
     CONF_LIGHT_ENTITIES,
-    CONF_MEDIA_CONTENT_ID,
-    CONF_MEDIA_CONTENT_TYPE,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_NOTIFY_TARGET_STANDARD,
     CONF_NOTIFY_TARGET_URGENT,
     CONF_PERSON_ENTITY,
     CONF_SLUG,
     DOMAIN,
-    MEDIA_CONTENT_TYPES,
 )
-
-
-def _media_content_type_selector() -> selector.Selector:
-    return selector.SelectSelector(
-        selector.SelectSelectorConfig(
-            options=list(MEDIA_CONTENT_TYPES),
-            custom_value=True,
-            mode=selector.SelectSelectorMode.DROPDOWN,
-        )
-    )
 
 
 def _validate_players(
@@ -85,10 +72,7 @@ def _validate_players(
 
 
 class _CommonFlow:
-    """Shared step handlers for create + options flows.
-
-    Subclasses must implement async_show_form and async_create/update entry.
-    """
+    """Shared step handlers for create + options flows."""
 
     hass: HomeAssistant
     _data: dict[str, Any]
@@ -116,22 +100,6 @@ class _CommonFlow:
                         domain="media_player", multiple=True
                     )
                 ),
-            }
-        )
-
-    def _media_content_schema(self, defaults: dict[str, Any]) -> vol.Schema:
-        return vol.Schema(
-            {
-                vol.Required(
-                    CONF_MEDIA_CONTENT_ID,
-                    default=defaults.get(CONF_MEDIA_CONTENT_ID, ""),
-                ): str,
-                vol.Required(
-                    CONF_MEDIA_CONTENT_TYPE,
-                    default=defaults.get(
-                        CONF_MEDIA_CONTENT_TYPE, "favorite_item_id"
-                    ),
-                ): _media_content_type_selector(),
             }
         )
 
@@ -173,7 +141,12 @@ class _CommonFlow:
 
 
 class WakeAlarmConfigFlow(ConfigFlow, _CommonFlow, domain=DOMAIN):
-    """Initial config flow."""
+    """Initial config flow.
+
+    Media content is intentionally NOT collected here — the user picks media
+    after setup via the card's media browser, which calls the
+    wake_alarm.set_media service.
+    """
 
     VERSION = 1
 
@@ -226,26 +199,12 @@ class WakeAlarmConfigFlow(ConfigFlow, _CommonFlow, domain=DOMAIN):
             errors, placeholders = _validate_players(self.hass, players)
             if not errors:
                 self._data[CONF_MEDIA_PLAYER_ENTITIES] = players
-                return await self.async_step_media_content()
+                return await self.async_step_presence()
         return self.async_show_form(
             step_id="media_players",
             data_schema=self._media_players_schema(self._data),
             errors=errors,
             description_placeholders=placeholders,
-        )
-
-    async def async_step_media_content(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._data[CONF_MEDIA_CONTENT_ID] = user_input[CONF_MEDIA_CONTENT_ID]
-            self._data[CONF_MEDIA_CONTENT_TYPE] = user_input[
-                CONF_MEDIA_CONTENT_TYPE
-            ]
-            return await self.async_step_presence()
-        return self.async_show_form(
-            step_id="media_content",
-            data_schema=self._media_content_schema(self._data),
         )
 
     async def async_step_presence(
@@ -293,7 +252,10 @@ class WakeAlarmConfigFlow(ConfigFlow, _CommonFlow, domain=DOMAIN):
 
 
 class WakeAlarmOptionsFlow(OptionsFlow, _CommonFlow):
-    """Options flow re-runs the same steps (without name)."""
+    """Options flow re-runs the same steps (without name).
+
+    Media selection is changed via the card, not here.
+    """
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
@@ -324,26 +286,12 @@ class WakeAlarmOptionsFlow(OptionsFlow, _CommonFlow):
             errors, placeholders = _validate_players(self.hass, players)
             if not errors:
                 self._data[CONF_MEDIA_PLAYER_ENTITIES] = players
-                return await self.async_step_media_content()
+                return await self.async_step_presence()
         return self.async_show_form(
             step_id="media_players",
             data_schema=self._media_players_schema(self._data),
             errors=errors,
             description_placeholders=placeholders,
-        )
-
-    async def async_step_media_content(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._data[CONF_MEDIA_CONTENT_ID] = user_input[CONF_MEDIA_CONTENT_ID]
-            self._data[CONF_MEDIA_CONTENT_TYPE] = user_input[
-                CONF_MEDIA_CONTENT_TYPE
-            ]
-            return await self.async_step_presence()
-        return self.async_show_form(
-            step_id="media_content",
-            data_schema=self._media_content_schema(self._data),
         )
 
     async def async_step_presence(
