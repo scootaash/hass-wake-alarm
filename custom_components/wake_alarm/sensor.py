@@ -17,6 +17,9 @@ from .const import (
     ATTR_MEDIA_CONTENT_ID,
     ATTR_MEDIA_CONTENT_TYPE,
     ATTR_MEDIA_THUMBNAIL,
+    CONF_LIGHT_ENTITIES,
+    CONF_MEDIA_PLAYER_ENTITIES,
+    CONF_PERSON_ENTITY,
     DOMAIN,
     MEDIA_STATE_NONE,
     STATE_IDLE,
@@ -79,6 +82,24 @@ class WakeAlarmNextAlarmSensor(_CoordinatorSensor):
     @property
     def native_value(self) -> datetime | None:
         return self._coordinator.next_fire
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Surface config-entry data the card needs (lights / players / person).
+
+        config_entry.data isn't readable from the frontend, so we mirror the
+        target entity IDs as attributes on this sensor. The card uses these
+        for the targets section in the settings view, and to scope the
+        media browser to the first selected media player.
+        """
+        data = self._entry.data
+        return {
+            "light_entities": list(data.get(CONF_LIGHT_ENTITIES, []) or []),
+            "media_player_entities": list(
+                data.get(CONF_MEDIA_PLAYER_ENTITIES, []) or []
+            ),
+            "person_entity": data.get(CONF_PERSON_ENTITY),
+        }
 
 
 class WakeAlarmStateSensor(_CoordinatorSensor):
