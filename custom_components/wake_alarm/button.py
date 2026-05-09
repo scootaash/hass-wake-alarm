@@ -21,6 +21,8 @@ _ACTIONS: tuple[tuple[str, str], ...] = (
     ("test_light_ramp", "async_test_light_ramp"),
     ("cancel_ramp", "async_cancel_ramp"),
     ("test_music", "async_test_music"),
+    ("dismiss", "async_dismiss"),
+    ("snooze", "async_snooze"),
 )
 
 

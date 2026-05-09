@@ -27,6 +27,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_point_in_time,
     async_track_state_change_event,
 )
@@ -34,9 +35,12 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_LIGHT_ENTITIES,
+    CONF_MEDIA_PLAYER_ENTITIES,
     CONF_SLUG,
     DAYS,
+    DEFAULT_AUTO_DISMISS_MIN,
     DEFAULT_LENGTH_MIN,
+    DEFAULT_SNOOZE_MIN,
     STATE_IDLE,
     STATE_PLAYING,
     STATE_RAMPING,
@@ -81,6 +85,10 @@ class WakeAlarmCoordinator:
 
         # Media selection sensor (registered when sensor entity adds itself)
         self._media_sensor = None  # type: ignore[var-annotated]
+
+        # Snooze + auto-dismiss timers
+        self._snooze_cancel: CALLBACK_TYPE | None = None
+        self._auto_dismiss_cancel: CALLBACK_TYPE | None = None
 
     # -------------------- public state --------------------
 
@@ -151,7 +159,7 @@ class WakeAlarmCoordinator:
         if self._cancel_schedule is not None:
             self._cancel_schedule()
             self._cancel_schedule = None
-        # Cancel any in-flight ramp / music
+        # Cancel any in-flight ramp / music / snooze / auto-dismiss
         if self._ramp_cancel_event is not None:
             self._ramp_cancel_event.set()
         if self._ramp_task is not None and not self._ramp_task.done():
@@ -160,11 +168,24 @@ class WakeAlarmCoordinator:
             self._music_cancel_event.set()
         if self._music_task is not None and not self._music_task.done():
             self._music_task.cancel()
+        self._cancel_snooze()
+        self._cancel_auto_dismiss()
 
     # -------------------- scheduling --------------------
 
     @callback
     def _async_on_dependency_change(self, event: Event) -> None:
+        # Mid-cycle disable: master enable flips off while a sequence is
+        # running → trigger a full dismiss (which itself reschedules).
+        if event.data.get("entity_id") == f"switch.{self.slug}_enabled":
+            new_state = event.data.get("new_state")
+            if (
+                new_state is not None
+                and new_state.state == "off"
+                and self.is_active
+            ):
+                self.hass.async_create_task(self.async_dismiss())
+                return
         self.async_recompute_schedule()
 
     @callback
@@ -284,7 +305,9 @@ class WakeAlarmCoordinator:
             return
         await self._async_start_music(end_state=STATE_IDLE)
 
-    async def _async_start_music(self, *, end_state: str) -> None:
+    async def _async_start_music(
+        self, *, end_state: str, from_snooze: bool = False
+    ) -> None:
         if self._music_task is not None and not self._music_task.done():
             _LOGGER.debug(
                 "music already running for %s; skipping start", self.slug
@@ -303,8 +326,9 @@ class WakeAlarmCoordinator:
         self._set_state(STATE_PLAYING)
         self._music_cancel_event = asyncio.Event()
         self._music_task = self.hass.async_create_task(
-            self._music_runner(end_state)
+            self._music_runner(end_state, from_snooze=from_snooze)
         )
+        self._start_auto_dismiss_if_configured()
 
     @callback
     def _async_handle_no_media(self) -> None:
@@ -316,9 +340,13 @@ class WakeAlarmCoordinator:
         # TODO step 7: notify.<urgent target> with the no-media message
         return
 
-    async def _music_runner(self, end_state: str) -> None:
+    async def _music_runner(
+        self, end_state: str, *, from_snooze: bool = False
+    ) -> None:
         try:
-            await async_run_music_sequence(self, self._music_cancel_event)
+            await async_run_music_sequence(
+                self, self._music_cancel_event, from_snooze=from_snooze
+            )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -328,6 +356,138 @@ class WakeAlarmCoordinator:
             self._music_cancel_event = None
             if self._state == STATE_PLAYING:
                 self._set_state(end_state)
+
+    # -------------------- snooze + dismiss --------------------
+
+    async def async_snooze(self) -> None:
+        """Snooze flow per the brief.
+
+        Pauses music (if any), cancels ramp/music tasks, transitions to
+        SNOOZING, starts a timer for snooze_min minutes. On fire, the music
+        sequence re-runs with from_snooze=True (skipping group join setup).
+        Lights are intentionally left untouched.
+        """
+        if self._state not in (STATE_RAMPING, STATE_PLAYING):
+            _LOGGER.info(
+                "snooze ignored for %s: state=%s",
+                self.slug,
+                self._state,
+            )
+            return
+
+        # End ramp if it's running (ramp_runner finally will not flip state
+        # back to IDLE because we set SNOOZING below before it runs).
+        if self._ramp_cancel_event is not None:
+            self._ramp_cancel_event.set()
+
+        # Pause music if it's running and stop the loop
+        if self._state == STATE_PLAYING:
+            players = list(
+                self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
+            )
+            if players:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "media_pause",
+                    {"entity_id": players[0]},
+                    blocking=False,
+                )
+            if self._music_cancel_event is not None:
+                self._music_cancel_event.set()
+
+        self._cancel_auto_dismiss()
+        self._set_state(STATE_SNOOZING)
+
+        snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
+        self._snooze_cancel = async_call_later(
+            self.hass,
+            snooze_min * 60,
+            self._async_snooze_finished,
+        )
+
+    async def _async_snooze_finished(self, _now: datetime) -> None:
+        self._snooze_cancel = None
+        if self._state != STATE_SNOOZING:
+            return
+        # Re-run music skipping the group join (group is already formed).
+        await self._async_start_music(end_state=STATE_IDLE, from_snooze=True)
+
+    async def async_dismiss(self) -> None:
+        """Full dismiss per the brief.
+
+        Stops music on all configured players, unjoins any formed group,
+        cancels every pending task/timer, leaves lights as the user has
+        them, returns to IDLE, and recomputes the next fire time.
+        """
+        if self._state == STATE_IDLE:
+            _LOGGER.debug("dismiss for %s: already idle", self.slug)
+            return
+
+        players = list(
+            self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
+        )
+        if players:
+            await self.hass.services.async_call(
+                "media_player",
+                "media_stop",
+                {"entity_id": players},
+                blocking=False,
+            )
+            if len(players) > 1:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "unjoin",
+                    {"entity_id": players[0]},
+                    blocking=False,
+                )
+
+        if self._ramp_cancel_event is not None:
+            self._ramp_cancel_event.set()
+        if self._music_cancel_event is not None:
+            self._music_cancel_event.set()
+        self._cancel_snooze()
+        self._cancel_auto_dismiss()
+
+        self._set_state(STATE_IDLE)
+        self.async_recompute_schedule()
+
+    @callback
+    def _cancel_snooze(self) -> None:
+        if self._snooze_cancel is not None:
+            self._snooze_cancel()
+            self._snooze_cancel = None
+
+    @callback
+    def _cancel_auto_dismiss(self) -> None:
+        if self._auto_dismiss_cancel is not None:
+            self._auto_dismiss_cancel()
+            self._auto_dismiss_cancel = None
+
+    @callback
+    def _start_auto_dismiss_if_configured(self) -> None:
+        """Arm the auto-dismiss timer if auto_dismiss_min > 0.
+
+        Cancels any prior timer first so this is safe to call on every
+        transition into PLAYING (initial fire and snooze-resume).
+        """
+        self._cancel_auto_dismiss()
+        minutes = int(
+            self.read_number("auto_dismiss_min", DEFAULT_AUTO_DISMISS_MIN)
+        )
+        if minutes <= 0:
+            return
+        self._auto_dismiss_cancel = async_call_later(
+            self.hass,
+            minutes * 60,
+            self._async_auto_dismiss_fire,
+        )
+
+    async def _async_auto_dismiss_fire(self, _now: datetime) -> None:
+        self._auto_dismiss_cancel = None
+        if self._state != STATE_PLAYING:
+            return
+        _LOGGER.info("auto-dismiss firing for %s", self.slug)
+        await self.async_dismiss()
 
     # -------------------- media selection --------------------
 

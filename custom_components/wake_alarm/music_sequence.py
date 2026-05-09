@@ -57,8 +57,16 @@ _PLAY_QUEUE_SETTLE_SEC = 5
 async def async_run_music_sequence(
     coordinator: "WakeAlarmCoordinator",
     cancel_event: asyncio.Event,
+    *,
+    from_snooze: bool = False,
 ) -> None:
-    """Run the appropriate path. Returns when sequence is done or cancelled."""
+    """Run the appropriate path. Returns when sequence is done or cancelled.
+
+    When ``from_snooze`` is True (a snooze timer just fired), the multi-Sonos
+    path skips its unjoin / 3s wait / vol-zero / join / 1s settle preamble
+    and resumes from the in-group preroll, since the group is already formed
+    from the original fire. The single-player path is unaffected.
+    """
     players: list[str] = list(
         coordinator.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
     )
@@ -93,6 +101,7 @@ async def async_run_music_sequence(
             target_volume,
             fade_sec,
             cancel_event,
+            from_snooze=from_snooze,
         )
     else:
         await _run_single_player(
@@ -150,35 +159,38 @@ async def _run_multi_player_sonos(
     target_volume: float,
     fade_sec: int,
     cancel_event: asyncio.Event,
+    *,
+    from_snooze: bool = False,
 ) -> None:
     group_coord = players[0]
     members = players[1:]
 
-    # 1. unjoin coordinator (clears any pre-existing group state)
-    await coordinator.hass.services.async_call(
-        "media_player",
-        "unjoin",
-        {"entity_id": group_coord},
-        blocking=True,
-    )
-    # 2. UPnP 800 mitigation
-    if await _interruptible_sleep(_UNJOIN_SETTLE_SEC, cancel_event):
-        return
-
-    # 3. volume 0 on coordinator (BEFORE)
-    await _volume_set(coordinator, group_coord, 0.0)
-
-    # 4. join the rest
-    if members:
+    if not from_snooze:
+        # 1. unjoin coordinator (clears any pre-existing group state)
         await coordinator.hass.services.async_call(
             "media_player",
-            "join",
-            {"entity_id": group_coord, "group_members": members},
+            "unjoin",
+            {"entity_id": group_coord},
             blocking=True,
         )
-    # 5. let the group form
-    if await _interruptible_sleep(_JOIN_SETTLE_SEC, cancel_event):
-        return
+        # 2. UPnP 800 mitigation
+        if await _interruptible_sleep(_UNJOIN_SETTLE_SEC, cancel_event):
+            return
+
+        # 3. volume 0 on coordinator (BEFORE)
+        await _volume_set(coordinator, group_coord, 0.0)
+
+        # 4. join the rest
+        if members:
+            await coordinator.hass.services.async_call(
+                "media_player",
+                "join",
+                {"entity_id": group_coord, "group_members": members},
+                blocking=True,
+            )
+        # 5. let the group form
+        if await _interruptible_sleep(_JOIN_SETTLE_SEC, cancel_event):
+            return
 
     # 6. volume 0 on each member individually (join does not propagate volume)
     await asyncio.gather(*(_volume_set(coordinator, p, 0.0) for p in players))
