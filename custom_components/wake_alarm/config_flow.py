@@ -118,6 +118,19 @@ class _CommonFlow:
         )
 
     def _notify_schema(self, defaults: dict[str, Any]) -> vol.Schema:
+        # Build a dropdown of registered notify.* services. custom_value=True
+        # so power users can paste a service that isn't loaded yet.
+        notify_services = sorted(
+            self.hass.services.async_services().get("notify", {}).keys()
+        )
+        options = [f"notify.{name}" for name in notify_services]
+        select = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=options,
+                custom_value=True,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
         return vol.Schema(
             {
                 vol.Optional(
@@ -127,7 +140,7 @@ class _CommonFlow:
                             CONF_NOTIFY_TARGET_STANDARD, ""
                         )
                     },
-                ): str,
+                ): select,
                 vol.Optional(
                     CONF_NOTIFY_TARGET_URGENT,
                     description={
@@ -135,7 +148,7 @@ class _CommonFlow:
                             CONF_NOTIFY_TARGET_URGENT, ""
                         )
                     },
-                ): str,
+                ): select,
             }
         )
 
