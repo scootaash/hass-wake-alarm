@@ -111,6 +111,21 @@
       "steps_per_min": { "name": "Steps per minute" },
       "music_fade_sec": { "name": "Music fade" },
       "auto_dismiss_min": { "name": "Auto dismiss" }
+    },
+    "sensor": {
+      "next_alarm": { "name": "Next Alarm" },
+      "state": {
+        "name": "State",
+        "state": {
+          "idle": "Idle",
+          "ramping": "Ramping",
+          "playing": "Playing",
+          "snoozing": "Snoozing"
+        }
+      }
+    },
+    "binary_sensor": {
+      "active": { "name": "Active" }
     }
   }
 }
