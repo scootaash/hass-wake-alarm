@@ -1,4 +1,4 @@
-import { LitElement, css, html, type PropertyValues, type TemplateResult } from "lit";
+import { LitElement, css, html, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
 import { DAYS, type DayKey, type HomeAssistant, type RelatedEntities } from "./types";
@@ -8,8 +8,21 @@ export class WakeAlarmMainView extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
   @property({ attribute: false }) public related?: RelatedEntities;
 
-  protected shouldUpdate(changed: PropertyValues): boolean {
-    return changed.has("hass") || changed.has("related");
+  private _tickInterval?: number;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    // Re-render every second so the snooze countdown ticks. Cheap; the
+    // template only emits new strings, no DOM rewiring.
+    this._tickInterval = window.setInterval(() => this.requestUpdate(), 1000);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this._tickInterval !== undefined) {
+      window.clearInterval(this._tickInterval);
+      this._tickInterval = undefined;
+    }
   }
 
   protected render(): TemplateResult {
@@ -31,9 +44,20 @@ export class WakeAlarmMainView extends LitElement {
       ? labelForFsmState(fsmState)
       : "Off";
 
-    const nextLabel = nextAlarmState?.state && nextAlarmState.state !== "unknown"
-      ? formatNext(nextAlarmState.state)
-      : "No upcoming alarm";
+    const snoozeUntilRaw = stateState?.attributes?.snooze_until as
+      | string
+      | null
+      | undefined;
+    const snoozeCountdown =
+      fsmState === "snoozing" && snoozeUntilRaw
+        ? formatCountdown(snoozeUntilRaw)
+        : null;
+
+    const nextLabel = snoozeCountdown
+      ? `Music in ${snoozeCountdown}`
+      : nextAlarmState?.state && nextAlarmState.state !== "unknown"
+        ? formatNext(nextAlarmState.state)
+        : "No upcoming alarm";
 
     return html`
       <ha-card>
@@ -104,9 +128,15 @@ export class WakeAlarmMainView extends LitElement {
 
   private _renderActiveActions(): TemplateResult {
     return html`
-      <div class="row">
-        <button class="btn" @click=${this._snooze}>Snooze</button>
-        <button class="btn danger" @click=${this._dismiss}>Dismiss</button>
+      <div class="action-row">
+        <button class="action-btn snooze" @click=${this._snooze}>
+          <ha-icon icon="mdi:alarm-snooze"></ha-icon>
+          <span>Snooze</span>
+        </button>
+        <button class="action-btn dismiss" @click=${this._dismiss}>
+          <ha-icon icon="mdi:alarm-off"></ha-icon>
+          <span>Dismiss</span>
+        </button>
       </div>
     `;
   }
@@ -254,6 +284,41 @@ export class WakeAlarmMainView extends LitElement {
       .chip-on ha-icon { color: rgb(76, 175, 80); }
       .chip-off ha-icon { color: var(--disabled-text-color); }
       .chip-on { border-color: rgba(76, 175, 80, 0.4); }
+
+      /* Snooze + Dismiss share the mode-tile vibe: tall, prominent,
+         half-width each so they line up under the mode tile. */
+      .action-row {
+        display: flex;
+        gap: 12px;
+      }
+      .action-btn {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 16px;
+        border-radius: var(--wa-radius);
+        border: 1px solid var(--divider-color);
+        background: var(--ha-card-background, var(--card-background-color));
+        color: var(--primary-text-color);
+        font-size: 1rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .action-btn:hover { background: var(--secondary-background-color); }
+      .action-btn ha-icon { --mdc-icon-size: 32px; }
+      .action-btn.snooze {
+        background: rgba(var(--rgb-primary-color, 33, 150, 243), 0.14);
+      }
+      .action-btn.snooze ha-icon { color: var(--primary-color); }
+      .action-btn.dismiss {
+        background: rgba(255, 82, 82, 0.14);
+        color: rgb(255, 82, 82);
+      }
+      .action-btn.dismiss ha-icon { color: rgb(255, 82, 82); }
     `,
   ];
 }
@@ -306,4 +371,13 @@ function formatNext(iso: string): string {
     hour12: false,
   };
   return new Intl.DateTimeFormat(undefined, opts).format(dt);
+}
+
+function formatCountdown(iso: string): string {
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return iso;
+  const remaining = Math.max(0, Math.round((target - Date.now()) / 1000));
+  const min = Math.floor(remaining / 60);
+  const sec = remaining % 60;
+  return `${min}:${pad(sec)}`;
 }

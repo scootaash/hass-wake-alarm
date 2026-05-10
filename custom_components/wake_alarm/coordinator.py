@@ -97,6 +97,9 @@ class WakeAlarmCoordinator:
         # Snooze + auto-dismiss timers
         self._snooze_cancel: CALLBACK_TYPE | None = None
         self._auto_dismiss_cancel: CALLBACK_TYPE | None = None
+        # Wall-clock target for the snooze finish; surfaced as a sensor
+        # attribute so the card can show a countdown.
+        self._snooze_finishes_at: datetime | None = None
 
         # Music-start callback scheduled from _async_on_fire
         self._cancel_music_start: CALLBACK_TYPE | None = None
@@ -119,6 +122,11 @@ class WakeAlarmCoordinator:
     @property
     def is_active(self) -> bool:
         return self._state != STATE_IDLE
+
+    @property
+    def snooze_finishes_at(self) -> datetime | None:
+        """Wall-clock time the snooze timer will fire (None unless snoozing)."""
+        return self._snooze_finishes_at
 
     def async_add_listener(
         self, update_callback: Callable[[], None]
@@ -461,14 +469,18 @@ class WakeAlarmCoordinator:
         self._set_state(STATE_SNOOZING)
 
         snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
+        self._snooze_finishes_at = dt_util.now() + timedelta(minutes=snooze_min)
         self._snooze_cancel = async_call_later(
             self.hass,
             snooze_min * 60,
             self._async_snooze_finished,
         )
+        # Re-notify so listeners pick up the new snooze_finishes_at.
+        self._notify_listeners()
 
     async def _async_snooze_finished(self, _now: datetime) -> None:
         self._snooze_cancel = None
+        self._snooze_finishes_at = None
         if self._state != STATE_SNOOZING:
             return
         # Re-run music skipping the group join (group is already formed).
@@ -525,6 +537,7 @@ class WakeAlarmCoordinator:
         if self._snooze_cancel is not None:
             self._snooze_cancel()
             self._snooze_cancel = None
+        self._snooze_finishes_at = None
 
     @callback
     def _cancel_auto_dismiss(self) -> None:
