@@ -22,9 +22,35 @@ CONF_PERSON_ENTITY = "person_entity"
 CONF_NOTIFY_TARGET_STANDARD = "notify_target_standard"
 CONF_NOTIFY_TARGET_URGENT = "notify_target_urgent"
 
-# Days of week, ordered Mon..Sun (matches datetime.weekday())
-DAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-DEFAULT_DAYS_ON: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri")
+# Days of week. Each entry is (entity_key, translation_key).
+#
+# entity_key is what appears in the entity_id and unique_id, prefixed
+# d1..d7 so HA's alphabetical entity sort displays the toggles in
+# calendar order (Mon..Sun) inside the device card.
+#
+# translation_key keeps the friendly label in strings.json stable as
+# "Mon", "Tue", etc. — no migration needed for the displayed name.
+DAY_DEFS: tuple[tuple[str, str], ...] = (
+    ("d1_mon", "mon"),
+    ("d2_tue", "tue"),
+    ("d3_wed", "wed"),
+    ("d4_thu", "thu"),
+    ("d5_fri", "fri"),
+    ("d6_sat", "sat"),
+    ("d7_sun", "sun"),
+)
+
+# Tuple of entity_keys in calendar order (positions 0..6 match
+# datetime.weekday()). Used by the coordinator to bucket day toggles.
+DAYS: tuple[str, ...] = tuple(k for k, _ in DAY_DEFS)
+
+# Defaults: Mon..Fri on, Sat/Sun off.
+DEFAULT_DAYS_ON: tuple[str, ...] = tuple(k for k, _ in DAY_DEFS[:5])
+
+# v1→v2 migration map: old-key → new-key for the day toggles.
+DAY_KEY_MIGRATION: dict[str, str] = {
+    tk: ek for ek, tk in DAY_DEFS
+}
 
 # State machine values exposed via sensor.<slug>_state
 STATE_IDLE = "idle"

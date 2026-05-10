@@ -1,4 +1,9 @@
-"""Config and options flow for Wake Alarm."""
+"""Config and options flow for Wake Alarm.
+
+Single-screen wizard. Both the create flow and the options flow render
+every field at once with per-field help text (translated via the
+``data_description`` key in strings.json).
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -71,100 +76,146 @@ def _validate_players(
     return errors, placeholders
 
 
-class _CommonFlow:
-    """Shared step handlers for create + options flows."""
-
-    hass: HomeAssistant
-    _data: dict[str, Any]
-
-    def _lights_schema(self, defaults: dict[str, Any]) -> vol.Schema:
-        return vol.Schema(
-            {
-                vol.Required(
-                    CONF_LIGHT_ENTITIES,
-                    default=defaults.get(CONF_LIGHT_ENTITIES, []),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="light", multiple=True)
-                ),
-            }
+def _notify_select(hass: HomeAssistant) -> selector.Selector:
+    """Dropdown of registered notify.* services. custom_value lets users
+    paste a service that isn't loaded yet."""
+    services = sorted(hass.services.async_services().get("notify", {}).keys())
+    options = [f"notify.{s}" for s in services]
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=options,
+            custom_value=True,
+            mode=selector.SelectSelectorMode.DROPDOWN,
         )
+    )
 
-    def _media_players_schema(self, defaults: dict[str, Any]) -> vol.Schema:
-        return vol.Schema(
-            {
-                vol.Required(
-                    CONF_MEDIA_PLAYER_ENTITIES,
-                    default=defaults.get(CONF_MEDIA_PLAYER_ENTITIES, []),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="media_player", multiple=True
-                    )
-                ),
-            }
+
+def _build_schema(
+    hass: HomeAssistant,
+    defaults: dict[str, Any],
+    *,
+    include_name: bool,
+) -> vol.Schema:
+    """Single-screen schema. ``include_name`` is False on the options flow
+    (slug is derived from name and used in entity IDs, so renaming the
+    instance after creation is not supported)."""
+    fields: dict[Any, Any] = {}
+
+    if include_name:
+        fields[
+            vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, ""))
+        ] = str
+
+    fields[
+        vol.Required(
+            CONF_LIGHT_ENTITIES,
+            default=defaults.get(CONF_LIGHT_ENTITIES, []),
         )
+    ] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="light", multiple=True)
+    )
 
-    def _presence_schema(self, defaults: dict[str, Any]) -> vol.Schema:
-        return vol.Schema(
-            {
-                vol.Optional(
-                    CONF_PERSON_ENTITY,
-                    description={
-                        "suggested_value": defaults.get(CONF_PERSON_ENTITY, "")
-                    },
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="person")
-                ),
-            }
+    fields[
+        vol.Required(
+            CONF_MEDIA_PLAYER_ENTITIES,
+            default=defaults.get(CONF_MEDIA_PLAYER_ENTITIES, []),
         )
+    ] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="media_player", multiple=True)
+    )
 
-    def _notify_schema(self, defaults: dict[str, Any]) -> vol.Schema:
-        # Build a dropdown of registered notify.* services. custom_value=True
-        # so power users can paste a service that isn't loaded yet.
-        notify_services = sorted(
-            self.hass.services.async_services().get("notify", {}).keys()
+    fields[
+        vol.Optional(
+            CONF_PERSON_ENTITY,
+            description={
+                "suggested_value": defaults.get(CONF_PERSON_ENTITY, "")
+            },
         )
-        options = [f"notify.{name}" for name in notify_services]
-        select = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=options,
-                custom_value=True,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
+    ] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="person")
+    )
+
+    notify = _notify_select(hass)
+    fields[
+        vol.Optional(
+            CONF_NOTIFY_TARGET_STANDARD,
+            description={
+                "suggested_value": defaults.get(
+                    CONF_NOTIFY_TARGET_STANDARD, ""
+                )
+            },
         )
-        return vol.Schema(
-            {
-                vol.Optional(
-                    CONF_NOTIFY_TARGET_STANDARD,
-                    description={
-                        "suggested_value": defaults.get(
-                            CONF_NOTIFY_TARGET_STANDARD, ""
-                        )
-                    },
-                ): select,
-                vol.Optional(
-                    CONF_NOTIFY_TARGET_URGENT,
-                    description={
-                        "suggested_value": defaults.get(
-                            CONF_NOTIFY_TARGET_URGENT, ""
-                        )
-                    },
-                ): select,
-            }
+    ] = notify
+
+    fields[
+        vol.Optional(
+            CONF_NOTIFY_TARGET_URGENT,
+            description={
+                "suggested_value": defaults.get(CONF_NOTIFY_TARGET_URGENT, "")
+            },
         )
+    ] = notify
+
+    return vol.Schema(fields)
 
 
-class WakeAlarmConfigFlow(ConfigFlow, _CommonFlow, domain=DOMAIN):
-    """Initial config flow.
+def _validate_input(
+    hass: HomeAssistant,
+    user_input: dict[str, Any],
+    *,
+    require_name: bool,
+) -> tuple[dict[str, str], dict[str, Any], dict[str, Any]]:
+    """Validate the single-screen form. Returns (errors, placeholders, data).
 
-    Media content is intentionally NOT collected here — the user picks media
-    after setup via the card's media browser, which calls the
-    wake_alarm.set_media service.
+    ``data`` is the cleaned dict ready for entry.data; only meaningful when
+    ``errors`` is empty.
     """
+    errors: dict[str, str] = {}
+    placeholders: dict[str, Any] = {}
+    data: dict[str, Any] = {}
 
-    VERSION = 1
+    if require_name:
+        name = (user_input.get(CONF_NAME) or "").strip()
+        slug = slugify(name)
+        if not slug:
+            errors[CONF_NAME] = "invalid_name"
+        else:
+            data[CONF_NAME] = name
+            data[CONF_SLUG] = slug
 
-    def __init__(self) -> None:
-        self._data: dict[str, Any] = {}
+    lights = user_input.get(CONF_LIGHT_ENTITIES) or []
+    if not lights:
+        errors[CONF_LIGHT_ENTITIES] = "required"
+    else:
+        data[CONF_LIGHT_ENTITIES] = list(lights)
+
+    players = user_input.get(CONF_MEDIA_PLAYER_ENTITIES) or []
+    if not players:
+        errors[CONF_MEDIA_PLAYER_ENTITIES] = "required"
+    else:
+        player_errors, ph = _validate_players(hass, players)
+        if player_errors:
+            errors.update(player_errors)
+            placeholders.update(ph)
+        else:
+            data[CONF_MEDIA_PLAYER_ENTITIES] = list(players)
+
+    person = user_input.get(CONF_PERSON_ENTITY)
+    if person:
+        data[CONF_PERSON_ENTITY] = person
+
+    for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
+        v = (user_input.get(k) or "").strip()
+        if v:
+            data[k] = v
+
+    return errors, placeholders, data
+
+
+class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Single-screen create flow."""
+
+    VERSION = 2
 
     @staticmethod
     @callback
@@ -175,166 +226,69 @@ class WakeAlarmConfigFlow(ConfigFlow, _CommonFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        placeholders: dict[str, Any] = {}
+
         if user_input is not None:
-            name = user_input[CONF_NAME].strip()
-            slug = slugify(name)
-            if not slug:
-                errors[CONF_NAME] = "invalid_name"
-            else:
-                await self.async_set_unique_id(slug)
+            errors, placeholders, data = _validate_input(
+                self.hass, user_input, require_name=True
+            )
+            if not errors:
+                await self.async_set_unique_id(data[CONF_SLUG])
                 self._abort_if_unique_id_configured()
-                self._data[CONF_NAME] = name
-                self._data[CONF_SLUG] = slug
-                return await self.async_step_lights()
+                return self.async_create_entry(
+                    title=data[CONF_NAME], data=data
+                )
+
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required(CONF_NAME): str}),
-            errors=errors,
-        )
-
-    async def async_step_lights(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._data[CONF_LIGHT_ENTITIES] = user_input[CONF_LIGHT_ENTITIES]
-            return await self.async_step_media_players()
-        return self.async_show_form(
-            step_id="lights", data_schema=self._lights_schema({})
-        )
-
-    async def async_step_media_players(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-        placeholders: dict[str, Any] = {}
-        if user_input is not None:
-            players = user_input[CONF_MEDIA_PLAYER_ENTITIES]
-            errors, placeholders = _validate_players(self.hass, players)
-            if not errors:
-                self._data[CONF_MEDIA_PLAYER_ENTITIES] = players
-                return await self.async_step_presence()
-        return self.async_show_form(
-            step_id="media_players",
-            data_schema=self._media_players_schema(self._data),
+            data_schema=_build_schema(
+                self.hass, user_input or {}, include_name=True
+            ),
             errors=errors,
             description_placeholders=placeholders,
         )
 
-    async def async_step_presence(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            person = user_input.get(CONF_PERSON_ENTITY)
-            if person:
-                self._data[CONF_PERSON_ENTITY] = person
-            return await self.async_step_notifications()
-        return self.async_show_form(
-            step_id="presence", data_schema=self._presence_schema({})
-        )
 
-    async def async_step_notifications(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
-                v = (user_input.get(k) or "").strip()
-                if v:
-                    self._data[k] = v
-            return await self.async_step_confirm()
-        return self.async_show_form(
-            step_id="notifications", data_schema=self._notify_schema({})
-        )
-
-    async def async_step_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(
-                title=self._data[CONF_NAME], data=self._data
-            )
-        summary = "\n".join(
-            f"- {k}: {v}"
-            for k, v in self._data.items()
-            if k != CONF_SLUG
-        )
-        return self.async_show_form(
-            step_id="confirm",
-            data_schema=vol.Schema({}),
-            description_placeholders={"summary": summary},
-        )
-
-
-class WakeAlarmOptionsFlow(OptionsFlow, _CommonFlow):
-    """Options flow re-runs the same steps (without name).
-
-    Media selection is changed via the card, not here.
-    """
+class WakeAlarmOptionsFlow(OptionsFlow):
+    """Single-screen options flow. Name/slug are intentionally locked."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
-        self._data: dict[str, Any] = dict(entry.data)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return await self.async_step_lights()
-
-    async def async_step_lights(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._data[CONF_LIGHT_ENTITIES] = user_input[CONF_LIGHT_ENTITIES]
-            return await self.async_step_media_players()
-        return self.async_show_form(
-            step_id="lights", data_schema=self._lights_schema(self._data)
-        )
-
-    async def async_step_media_players(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         placeholders: dict[str, Any] = {}
+        defaults = dict(self._entry.data)
+
         if user_input is not None:
-            players = user_input[CONF_MEDIA_PLAYER_ENTITIES]
-            errors, placeholders = _validate_players(self.hass, players)
+            errors, placeholders, new_data = _validate_input(
+                self.hass, user_input, require_name=False
+            )
             if not errors:
-                self._data[CONF_MEDIA_PLAYER_ENTITIES] = players
-                return await self.async_step_presence()
+                # Preserve immutable fields (name, slug) from the existing entry.
+                merged = dict(self._entry.data)
+                merged.update(new_data)
+                # Drop optional fields that were cleared in this submit.
+                for k in (
+                    CONF_PERSON_ENTITY,
+                    CONF_NOTIFY_TARGET_STANDARD,
+                    CONF_NOTIFY_TARGET_URGENT,
+                ):
+                    if k not in new_data:
+                        merged.pop(k, None)
+                self.hass.config_entries.async_update_entry(
+                    self._entry, data=merged
+                )
+                return self.async_create_entry(title="", data={})
+            defaults = {**defaults, **user_input}
+
         return self.async_show_form(
-            step_id="media_players",
-            data_schema=self._media_players_schema(self._data),
+            step_id="init",
+            data_schema=_build_schema(
+                self.hass, defaults, include_name=False
+            ),
             errors=errors,
             description_placeholders=placeholders,
-        )
-
-    async def async_step_presence(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            person = user_input.get(CONF_PERSON_ENTITY)
-            if person:
-                self._data[CONF_PERSON_ENTITY] = person
-            else:
-                self._data.pop(CONF_PERSON_ENTITY, None)
-            return await self.async_step_notifications()
-        return self.async_show_form(
-            step_id="presence", data_schema=self._presence_schema(self._data)
-        )
-
-    async def async_step_notifications(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
-                v = (user_input.get(k) or "").strip()
-                if v:
-                    self._data[k] = v
-                else:
-                    self._data.pop(k, None)
-            self.hass.config_entries.async_update_entry(
-                self._entry, data=self._data
-            )
-            return self.async_create_entry(title="", data={})
-        return self.async_show_form(
-            step_id="notifications", data_schema=self._notify_schema(self._data)
         )

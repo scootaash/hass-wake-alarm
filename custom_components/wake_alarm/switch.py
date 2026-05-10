@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DAYS, DEFAULT_DAYS_ON
+from .const import DAY_DEFS, DEFAULT_DAYS_ON
 from .entity import WakeAlarmEntity
 
 
@@ -19,10 +19,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     entities: list[SwitchEntity] = [WakeAlarmEnabledSwitch(entry)]
-    entities.extend(
-        WakeAlarmDaySwitch(entry, day, default_on=day in DEFAULT_DAYS_ON)
-        for day in DAYS
-    )
+    for entity_key, translation_key in DAY_DEFS:
+        entities.append(
+            WakeAlarmDaySwitch(
+                entry,
+                entity_key=entity_key,
+                translation_key=translation_key,
+                default_on=entity_key in DEFAULT_DAYS_ON,
+            )
+        )
     async_add_entities(entities)
 
 
@@ -61,8 +66,20 @@ class WakeAlarmEnabledSwitch(_RestorableSwitch):
 
 
 class WakeAlarmDaySwitch(_RestorableSwitch):
-    """Day-of-week toggle (Mon–Fri default on, Sat/Sun default off)."""
+    """Day-of-week toggle (Mon–Fri default on, Sat/Sun default off).
 
-    def __init__(self, entry: ConfigEntry, day: str, default_on: bool) -> None:
-        super().__init__(entry, key=day, default_on=default_on)
-        self._attr_translation_key = day
+    entity_key is the d1_mon..d7_sun key embedded in the entity_id and
+    unique_id; translation_key is the short label ("mon"..."sun") that
+    strings.json maps to the user-visible "Mon"..."Sun".
+    """
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        *,
+        entity_key: str,
+        translation_key: str,
+        default_on: bool,
+    ) -> None:
+        super().__init__(entry, key=entity_key, default_on=default_on)
+        self._attr_translation_key = translation_key
