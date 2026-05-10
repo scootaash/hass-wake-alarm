@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pytest
+        run: pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  card:
+    name: card lint + test + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: card
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: card/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check (tsc --noEmit)
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Verify committed bundle is up to date with source
+        run: |
+          git diff --exit-code ../www/wake-alarm-card.js \
+            || (echo "::error::www/wake-alarm-card.js is stale. Run 'npm run build' inside card/ and commit the result." && exit 1)
