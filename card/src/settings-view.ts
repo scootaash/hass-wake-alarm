@@ -118,6 +118,20 @@ export class WakeAlarmSettingsView extends LitElement {
           <button class="btn" @click=${() => this._press("test_music")}>
             Test music
           </button>
+          <button
+            class="btn"
+            @click=${() => this._press("test_standard_notification")}
+            title="Send the standard alarm notification now"
+          >
+            Test standard notification
+          </button>
+          <button
+            class="btn"
+            @click=${() => this._press("test_urgent_notification")}
+            title="Send the urgent (critical) notification now"
+          >
+            Test urgent notification
+          </button>
         </div>
 
         <div class="section media">

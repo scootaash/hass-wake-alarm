@@ -4,6 +4,11 @@ Sunrise wake-up alarms for Home Assistant. Lights ramp up before alarm
 time, music fades in at alarm time. Multi-instance, multi-room, custom
 Lovelace card included.
 
+**Tested with:** Philips Hue lights, Sonos speakers, and the iOS
+Companion app. Not tested on Android or with other light / media-player
+integrations — should work everywhere HA supports the underlying
+`light.turn_on` and `media_player.play_media` services, but YMMV.
+
 ## Install
 
 1. HACS → ⋮ → Custom repositories → add `https://github.com/scootaash/hass-wake-alarm` with category **Integration**.
@@ -20,7 +25,7 @@ Resources` step.
 
 ```yaml
 type: custom:wake-alarm-card
-entity: switch.<your_slug>_enabled
+entity: switch.my_alarm_enabled
 ```
 
 Pass any wake_alarm enabled-switch as `entity` and the card derives
@@ -28,50 +33,56 @@ every related entity from the same config entry.
 
 ## Building your own dashboard
 
-Each alarm instance creates a fixed set of entities scoped by `<slug>`,
-all of which can be used in any standard HA card (entities, gauges,
-buttons, conditional cards, automations…). Replace `<slug>` with the
-slug HA derived from your alarm name (e.g. `master_bedroom`).
+Every example below assumes you named your alarm **My Alarm** at setup,
+which gives a slug of `my_alarm`. Replace `my_alarm` with whatever slug
+HA derived from your instance name.
+
+Each alarm instance creates a fixed set of entities all of which can be
+used in any standard HA card (entities, gauges, buttons, conditional
+cards, automations…).
 
 ### Switches
 
-- `switch.<slug>_enabled` — master enable; toggle to arm/disarm
-- `switch.<slug>_mon` … `switch.<slug>_sun` — day-of-week toggles
+- `switch.my_alarm_enabled` — master enable; toggle to arm/disarm
+- `switch.my_alarm_d1_mon` … `switch.my_alarm_d7_sun` — day-of-week toggles
+  (the `dN_` prefix gives calendar order in HA's device card)
 
 ### Time + numbers (all writable via UI)
 
-- `time.<slug>_alarm_time`
-- `number.<slug>_length_min` (1–120)
-- `number.<slug>_start_kelvin` (1500–6500)
-- `number.<slug>_target_kelvin` (1500–6500)
-- `number.<slug>_max_brightness_pct` (1–100)
-- `number.<slug>_volume` (0.0–1.0)
-- `number.<slug>_snooze_min` (1–30)
-- `number.<slug>_steps_per_min` (5–60)
-- `number.<slug>_music_fade_sec` (0–300)
-- `number.<slug>_auto_dismiss_min` (0–120, 0 disables)
+- `time.my_alarm_alarm_time`
+- `number.my_alarm_length_min` (1–120)
+- `number.my_alarm_start_kelvin` (1500–6500)
+- `number.my_alarm_target_kelvin` (1500–6500)
+- `number.my_alarm_max_brightness_pct` (1–100)
+- `number.my_alarm_volume` (0.0–1.0)
+- `number.my_alarm_snooze_min` (1–30)
+- `number.my_alarm_steps_per_min` (5–60)
+- `number.my_alarm_music_fade_sec` (0–300)
+- `number.my_alarm_auto_dismiss_min` (0–120, 0 disables)
 
 ### Action buttons
 
 Press via `button.press` service or tap in the UI:
 
-- `button.<slug>_test_light_ramp`
-- `button.<slug>_test_music`
-- `button.<slug>_cancel_ramp`
-- `button.<slug>_dismiss`
-- `button.<slug>_snooze`
+- `button.my_alarm_test_light_ramp`
+- `button.my_alarm_test_music`
+- `button.my_alarm_test_standard_notification`
+- `button.my_alarm_test_urgent_notification`
+- `button.my_alarm_cancel_ramp`
+- `button.my_alarm_dismiss`
+- `button.my_alarm_snooze`
 
 ### Status
 
-- `sensor.<slug>_next_alarm` — timestamp of the next scheduled fire.
+- `sensor.my_alarm_next_alarm` — timestamp of the next scheduled fire.
   Attributes: `light_entities`, `media_player_entities`, `person_entity`.
-- `sensor.<slug>_state` — enum: `idle` / `ramping` / `playing` / `snoozing`.
+- `sensor.my_alarm_state` — enum: `idle` / `ramping` / `playing` / `snoozing`.
   When `snoozing`, attribute `snooze_until` is the ISO timestamp the
   music will resume.
-- `sensor.<slug>_media_selection` — friendly title of the picked media,
+- `sensor.my_alarm_media_selection` — friendly title of the picked media,
   or `none`. Attributes: `media_content_id`, `media_content_type`,
   `thumbnail`.
-- `binary_sensor.<slug>_active` — on whenever a sequence is running
+- `binary_sensor.my_alarm_active` — on whenever a sequence is running
   (any state other than `idle`).
 
 ### Services
@@ -81,21 +92,29 @@ Press via `button.press` service or tap in the UI:
 - `wake_alarm.cancel_ramp`
 - `wake_alarm.test_light_ramp`
 - `wake_alarm.test_music`
+- `wake_alarm.test_standard_notification`
+- `wake_alarm.test_urgent_notification`
 - `wake_alarm.set_media` — persists the picked media for an alarm; called
   by the card after the user picks via the media browser. Fields:
   `media_content_id`, `media_content_type`, `title`, `thumbnail`.
 
 ### Example automation
 
+Auto-dismiss the alarm if you leave home while it's still running
+(useful if you snoozed and walked out):
+
 ```yaml
-alias: Lights off when alarm dismissed
+alias: "Wake Alarm: dismiss if I leave home while it's running"
 trigger:
   - platform: state
-    entity_id: sensor.master_bedroom_state
-    from: playing
-    to: idle
+    entity_id: person.me
+    to: not_home
+condition:
+  - condition: state
+    entity_id: binary_sensor.my_alarm_active
+    state: "on"
 action:
-  - service: light.turn_off
+  - service: wake_alarm.dismiss
     target:
-      entity_id: light.bedroom
+      entity_id: switch.my_alarm_enabled
 ```

@@ -45,6 +45,8 @@ const BUTTON_KEYS = [
   "test_light_ramp",
   "cancel_ramp",
   "test_music",
+  "test_standard_notification",
+  "test_urgent_notification",
   "dismiss",
   "snooze",
 ] as const;

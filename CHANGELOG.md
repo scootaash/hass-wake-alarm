@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Snooze sensor attribute**: `sensor.<slug>_state` exposes `snooze_until`
   as an ISO-string attribute while snoozing, surfaced in the card's mode
   tile and available for any custom UI.
+- **Test-notification buttons + services**: `button.<slug>_test_standard_notification`
+  and `button.<slug>_test_urgent_notification` (plus matching
+  `wake_alarm.test_*_notification` services) fire the actual standard /
+  urgent payloads on demand so you can verify the iOS interruption
+  level + sound and the Android channel without scheduling an alarm.
+- **README**: documents `my_alarm` as the example slug, lists tested
+  platforms (Hue, Sonos, iOS Companion), and includes a project-relevant
+  automation example (auto-dismiss when you leave home).
 
 ### Changed
 

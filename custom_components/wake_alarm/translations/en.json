@@ -106,6 +106,8 @@
       "test_light_ramp": { "name": "Test light ramp" },
       "cancel_ramp": { "name": "Cancel ramp" },
       "test_music": { "name": "Test music" },
+      "test_standard_notification": { "name": "Test standard notification" },
+      "test_urgent_notification": { "name": "Test urgent notification" },
       "dismiss": { "name": "Dismiss" },
       "snooze": { "name": "Snooze" }
     }
@@ -152,6 +154,14 @@
     "test_music": {
       "name": "Test music",
       "description": "Run the music sequence now using current settings and the selected media."
+    },
+    "test_standard_notification": {
+      "name": "Test standard notification",
+      "description": "Send the standard alarm notification now. Uses iOS active interruption level and the Android wake_alarm_standard channel."
+    },
+    "test_urgent_notification": {
+      "name": "Test urgent notification",
+      "description": "Send the urgent fallback notification now. Uses iOS critical sound + critical interruption level and the Android wake_alarm_urgent channel."
     }
   }
 }

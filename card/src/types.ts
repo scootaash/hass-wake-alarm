@@ -85,6 +85,8 @@ export interface RelatedEntities {
     test_light_ramp: string;
     cancel_ramp: string;
     test_music: string;
+    test_standard_notification: string;
+    test_urgent_notification: string;
     dismiss: string;
     snooze: string;
   };

@@ -46,6 +46,8 @@ _TARGET_SERVICES: tuple[tuple[str, str], ...] = (
     ("cancel_ramp", "async_cancel_ramp"),
     ("test_light_ramp", "async_test_light_ramp"),
     ("test_music", "async_test_music"),
+    ("test_standard_notification", "async_test_standard_notification"),
+    ("test_urgent_notification", "async_test_urgent_notification"),
 )
 
 _TARGET_SCHEMA = vol.Schema(
