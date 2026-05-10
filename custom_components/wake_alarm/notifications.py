@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ._pure import build_action_id, parse_action_id
 from .const import (
     CONF_NOTIFY_TARGET_STANDARD,
     CONF_NOTIFY_TARGET_URGENT,
@@ -32,22 +33,17 @@ _LOGGER = logging.getLogger(__name__)
 
 ACTION_SNOOZE = "snooze"
 ACTION_DISMISS = "dismiss"
-_ACTION_PREFIX = "wake_alarm:"
 
-
-def build_action_id(action: str, entry_id: str) -> str:
-    """Build a stable, parseable action ID for a notification button."""
-    return f"{_ACTION_PREFIX}{action}:{entry_id}"
-
-
-def parse_action_id(action: str) -> tuple[str, str] | None:
-    """Inverse of build_action_id. Returns (action, entry_id) or None."""
-    if not action.startswith(_ACTION_PREFIX):
-        return None
-    parts = action.split(":", 2)
-    if len(parts) != 3:
-        return None
-    return parts[1], parts[2]
+# Re-exported so existing imports (services.py) keep working.
+__all__ = (
+    "ACTION_SNOOZE",
+    "ACTION_DISMISS",
+    "build_action_id",
+    "parse_action_id",
+    "async_send_standard",
+    "async_send_player_unavailable",
+    "async_send_no_media",
+)
 
 
 def _action_buttons(entry_id: str) -> list[dict]:

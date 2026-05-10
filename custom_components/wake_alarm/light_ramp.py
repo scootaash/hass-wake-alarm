@@ -24,6 +24,7 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
+from ._pure import clamp_kelvin, compute_step_target
 from .const import (
     CONF_LIGHT_ENTITIES,
     DEFAULT_LENGTH_MIN,
@@ -65,23 +66,19 @@ async def async_run_light_ramp(
 
     total_steps = max(1, length_min * steps_per_min)
     per_step_sec = max(1, math.ceil(60 / max(1, steps_per_min)))
-    denom = total_steps - 1 if total_steps > 1 else 1
 
     # Initial turn-on at 1% / start_kelvin (turns on any lights that are off)
     await coordinator.async_call_light_turn_on(
-        light_entities, brightness_pct=1, kelvin=_clamp_kelvin(start_k)
+        light_entities, brightness_pct=1, kelvin=clamp_kelvin(start_k)
     )
 
     for idx in range(total_steps):
         if cancel_event.is_set():
             return
 
-        if total_steps <= 1:
-            linear_pct = max_pct
-            linear_k = target_k
-        else:
-            linear_pct = round(1.0 + ((max_pct - 1.0) / denom) * idx)
-            linear_k = round(start_k + ((target_k - start_k) / denom) * idx)
+        linear_pct, linear_k = compute_step_target(
+            idx, total_steps, max_pct, start_k, target_k
+        )
 
         current_pct = _max_current_brightness_pct(coordinator, light_entities)
 
@@ -95,8 +92,8 @@ async def async_run_light_ramp(
             )
             return
 
-        next_pct = max(1, min(100, max(int(linear_pct), current_pct)))
-        next_k = _clamp_kelvin(int(linear_k))
+        next_pct = max(1, min(100, max(linear_pct, current_pct)))
+        next_k = clamp_kelvin(linear_k)
 
         await coordinator.async_call_light_turn_on(
             light_entities, brightness_pct=next_pct, kelvin=next_k
@@ -107,14 +104,6 @@ async def async_run_light_ramp(
             return  # cancelled mid-step
         except asyncio.TimeoutError:
             continue
-
-
-def _clamp_kelvin(k: int) -> int:
-    if k < 1500:
-        return 1500
-    if k > 6500:
-        return 6500
-    return k
 
 
 def _max_current_brightness_pct(
