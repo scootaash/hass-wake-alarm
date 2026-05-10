@@ -116,6 +116,13 @@ class WakeAlarmStateSensor(_CoordinatorSensor):
     def native_value(self) -> str:
         return self._coordinator.state
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        snooze_until = self._coordinator.snooze_finishes_at
+        return {
+            "snooze_until": snooze_until.isoformat() if snooze_until else None,
+        }
+
 
 class WakeAlarmMediaSelectionSensor(WakeAlarmEntity, SensorEntity, RestoreEntity):
     """Read-only sensor reflecting the user's last media selection.

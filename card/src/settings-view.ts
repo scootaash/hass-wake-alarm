@@ -1,25 +1,67 @@
 import { LitElement, css, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
+import "./media-browser";
 import type { HomeAssistant, MediaPickedItem, RelatedEntities } from "./types";
 
 interface NumberSpec {
   key: keyof RelatedEntities["numbers"];
   label: string;
+  description: string;
   min: number;
   max: number;
   step: number;
 }
 
 const SLIDERS: NumberSpec[] = [
-  { key: "snooze_min", label: "Snooze (min)", min: 1, max: 30, step: 1 },
-  { key: "length_min", label: "Length (min)", min: 1, max: 120, step: 1 },
-  { key: "start_kelvin", label: "Start K", min: 1500, max: 6500, step: 50 },
-  { key: "target_kelvin", label: "Target K", min: 1500, max: 6500, step: 50 },
-  { key: "max_brightness_pct", label: "Max % Brightness", min: 1, max: 100, step: 1 },
-  { key: "volume", label: "Alarm Volume (0–1)", min: 0, max: 1, step: 0.01 },
-  { key: "music_fade_sec", label: "Music fade (s)", min: 0, max: 300, step: 5 },
-  { key: "auto_dismiss_min", label: "Auto-dismiss (min)", min: 0, max: 120, step: 1 },
+  {
+    key: "snooze_min",
+    label: "Snooze (min)",
+    description: "How long the snooze pause lasts before music resumes.",
+    min: 1, max: 30, step: 1,
+  },
+  {
+    key: "length_min",
+    label: "Length (min)",
+    description: "Total minutes the lights ramp up before the alarm time.",
+    min: 1, max: 120, step: 1,
+  },
+  {
+    key: "start_kelvin",
+    label: "Start K",
+    description: "Warm colour temperature at the beginning of the ramp.",
+    min: 1500, max: 6500, step: 50,
+  },
+  {
+    key: "target_kelvin",
+    label: "Target K",
+    description: "Cool colour temperature reached at the alarm time.",
+    min: 1500, max: 6500, step: 50,
+  },
+  {
+    key: "max_brightness_pct",
+    label: "Max % Brightness",
+    description: "Peak brightness reached at the alarm time.",
+    min: 1, max: 100, step: 1,
+  },
+  {
+    key: "volume",
+    label: "Alarm Volume (0–1)",
+    description: "Final volume the music fades up to. Defaults capped low to prevent accidents.",
+    min: 0, max: 1, step: 0.01,
+  },
+  {
+    key: "music_fade_sec",
+    label: "Music fade (s)",
+    description: "How long the volume takes to fade from 0 to the target volume.",
+    min: 0, max: 300, step: 5,
+  },
+  {
+    key: "auto_dismiss_min",
+    label: "Auto-dismiss (min)",
+    description: "Stop everything automatically after this long. 0 disables.",
+    min: 0, max: 120, step: 1,
+  },
 ];
 
 @customElement("wake-alarm-settings-view")
@@ -145,6 +187,7 @@ export class WakeAlarmSettingsView extends LitElement {
           <span class="label">${spec.label}</span>
           <span class="value">${display}</span>
         </div>
+        <div class="slider-desc">${spec.description}</div>
         <input
           type="range"
           min=${spec.min}
@@ -215,12 +258,11 @@ export class WakeAlarmSettingsView extends LitElement {
               <ha-icon icon="mdi:close"></ha-icon>
             </ha-icon-button>
           </div>
-          <ha-media-player-browse
+          <wake-alarm-media-browser
             .hass=${this.hass}
             .entityId=${targetPlayer}
-            .navigateIds=${[{ media_content_id: undefined, media_content_type: undefined }]}
             @media-picked=${this._onMediaPicked}
-          ></ha-media-player-browse>
+          ></wake-alarm-media-browser>
         </div>
       </div>
     `;
@@ -292,6 +334,11 @@ export class WakeAlarmSettingsView extends LitElement {
       .slider-row input[type="range"] {
         width: 100%;
         accent-color: var(--primary-color);
+      }
+      .slider-desc {
+        font-size: 0.8rem;
+        color: var(--secondary-text-color);
+        line-height: 1.3;
       }
 
       .media-row {
@@ -380,9 +427,10 @@ export class WakeAlarmSettingsView extends LitElement {
         font-size: 1.1rem;
         font-weight: 500;
       }
-      ha-media-player-browse {
+      wake-alarm-media-browser {
         flex: 1;
         overflow: auto;
+        min-height: 0;
       }
     `,
   ];
