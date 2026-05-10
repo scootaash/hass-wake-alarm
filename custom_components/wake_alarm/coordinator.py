@@ -19,6 +19,7 @@ from datetime import datetime, time as dt_time, timedelta
 from typing import Callable
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_NAME
 from homeassistant.core import (
     CALLBACK_TYPE,
     Context,
@@ -36,6 +37,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
+    CONF_PERSON_ENTITY,
     CONF_SLUG,
     DAYS,
     DEFAULT_AUTO_DISMISS_MIN,
@@ -48,6 +50,11 @@ from .const import (
 )
 from .light_ramp import async_run_light_ramp
 from .music_sequence import async_run_music_sequence
+from .notifications import (
+    async_send_no_media,
+    async_send_player_unavailable,
+    async_send_standard,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,7 +97,15 @@ class WakeAlarmCoordinator:
         self._snooze_cancel: CALLBACK_TYPE | None = None
         self._auto_dismiss_cancel: CALLBACK_TYPE | None = None
 
+        # Music-start callback scheduled from _async_on_fire
+        self._cancel_music_start: CALLBACK_TYPE | None = None
+
     # -------------------- public state --------------------
+
+    @property
+    def name(self) -> str:
+        """User-friendly name for this alarm instance."""
+        return self.entry.data.get(CONF_NAME, self.slug)
 
     @property
     def state(self) -> str:
@@ -170,6 +185,7 @@ class WakeAlarmCoordinator:
             self._music_task.cancel()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
+        self._cancel_pending_music_start()
 
     # -------------------- scheduling --------------------
 
@@ -232,19 +248,86 @@ class WakeAlarmCoordinator:
                 return candidate
         return None
 
-    # -------------------- fire callback (stub for now) --------------------
+    # -------------------- fire callback --------------------
 
     async def _async_on_fire(self, _now: datetime) -> None:
-        """Fire callback. Real ramp/music wiring lands in step 5."""
+        """Fire at ramp_start. Per BRIEF.md "On fire":
+
+        1. Master enable check
+        2. Person presence check (if configured)
+        3. Start the light ramp
+        4. Schedule music start at alarm_time
+        """
         self._cancel_schedule = None
         if not self._read_enabled():
             self.async_recompute_schedule()
             return
-        # TODO step 5: presence check, light ramp + music sequence.
-        # For step 4 we just bounce so the schedule rolls forward.
-        self._set_state(STATE_RAMPING)
-        self._set_state(STATE_IDLE)
-        self.async_recompute_schedule()
+
+        # Person presence check applies to the whole sequence (not just the
+        # pre-phase, unlike the legacy YAML).
+        person = self.entry.data.get(CONF_PERSON_ENTITY)
+        if person:
+            person_state = self.hass.states.get(person)
+            if person_state is None or person_state.state != "home":
+                _LOGGER.info(
+                    "alarm for %s skipped: %s not home",
+                    self.slug,
+                    person,
+                )
+                self.async_recompute_schedule()
+                return
+
+        # Capture alarm_time (== self._next_fire). The schedule won't be
+        # recomputed mid-cycle; it only recomputes after dismiss / completion.
+        alarm_time = self._next_fire
+        await self._async_start_ramp(end_state=STATE_IDLE)
+
+        if alarm_time is None:
+            return
+        if alarm_time > dt_util.now():
+            self._cancel_music_start = async_track_point_in_time(
+                self.hass, self._async_on_music_start, alarm_time
+            )
+        else:
+            # ramp_start was already in the past at fire time (mid-cycle
+            # restart) → fire music immediately.
+            self.hass.async_create_task(
+                self._async_on_music_start(dt_util.now())
+            )
+
+    async def _async_on_music_start(self, _now: datetime) -> None:
+        """Fired at alarm_time. Decide between music, urgent, or no-media."""
+        self._cancel_music_start = None
+
+        players = list(
+            self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
+        )
+        unavailable = [
+            ent_id
+            for ent_id in players
+            if (st := self.hass.states.get(ent_id)) is None
+            or st.state in ("unavailable", "unknown")
+        ]
+        if unavailable:
+            _LOGGER.warning(
+                "alarm at %s: players unavailable %s; skipping music",
+                self.slug,
+                unavailable,
+            )
+            await async_send_player_unavailable(self, unavailable)
+            # Lights continue ramping; ramp_runner finally returns to IDLE.
+            return
+
+        if self.current_media() is None:
+            _LOGGER.warning(
+                "alarm at %s: no media set; skipping music",
+                self.slug,
+            )
+            await async_send_no_media(self)
+            return
+
+        await self._async_start_music(end_state=STATE_IDLE)
+        await async_send_standard(self)
 
     # -------------------- light ramp --------------------
 
@@ -313,15 +396,14 @@ class WakeAlarmCoordinator:
                 "music already running for %s; skipping start", self.slug
             )
             return
-        # Precondition: no media picked → skip music entirely. At alarm fire
-        # time the urgent notification path takes over (step 7); for the test
-        # button it is just a no-op with a log line.
+        # Precondition: no media picked → skip music entirely. The on-fire
+        # path handles the urgent notification on its own; here (test button
+        # or snooze-resume) we just log and bail.
         if self.current_media() is None:
             _LOGGER.warning(
                 "music skipped for %s: no media selected (use the card to pick)",
                 self.slug,
             )
-            self._async_handle_no_media()
             return
         self._set_state(STATE_PLAYING)
         self._music_cancel_event = asyncio.Event()
@@ -329,16 +411,6 @@ class WakeAlarmCoordinator:
             self._music_runner(end_state, from_snooze=from_snooze)
         )
         self._start_auto_dismiss_if_configured()
-
-    @callback
-    def _async_handle_no_media(self) -> None:
-        """Hook for the urgent 'no media configured' notification path.
-
-        Wired up properly in step 7 (mobile notifications). For now this is
-        a placeholder so the call site reads correctly.
-        """
-        # TODO step 7: notify.<urgent target> with the no-media message
-        return
 
     async def _music_runner(
         self, end_state: str, *, from_snooze: bool = False
@@ -396,6 +468,7 @@ class WakeAlarmCoordinator:
                 self._music_cancel_event.set()
 
         self._cancel_auto_dismiss()
+        self._cancel_pending_music_start()
         self._set_state(STATE_SNOOZING)
 
         snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
@@ -447,9 +520,16 @@ class WakeAlarmCoordinator:
             self._music_cancel_event.set()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
+        self._cancel_pending_music_start()
 
         self._set_state(STATE_IDLE)
         self.async_recompute_schedule()
+
+    @callback
+    def _cancel_pending_music_start(self) -> None:
+        if self._cancel_music_start is not None:
+            self._cancel_music_start()
+            self._cancel_music_start = None
 
     @callback
     def _cancel_snooze(self) -> None:
