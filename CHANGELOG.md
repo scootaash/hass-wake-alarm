@@ -34,7 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Day-of-week toggles renamed** to `switch.<slug>_d1_mon` …
   `switch.<slug>_d7_sun` so HA's alphabetical entity sort displays them in
   calendar order in Settings → Devices & Services. The user-facing labels
-  ("Mon" through "Sun") are unchanged.
+  ("Mon" through "Sun") become "Enable Mon" through "Enable Sun" so the
+  intent is obvious in the device card.
+- **Device-card layout**: day toggles, alarm time, and every number entity
+  now declare `entity_category=CONFIG`. They cluster under a "Configuration"
+  section, leaving the master enable as the only top-level control next to
+  the action buttons and status sensors.
 
 ### Migration
 

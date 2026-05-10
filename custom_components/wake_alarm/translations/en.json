@@ -64,13 +64,13 @@
   "entity": {
     "switch": {
       "enabled": { "name": "Enabled" },
-      "mon": { "name": "Mon" },
-      "tue": { "name": "Tue" },
-      "wed": { "name": "Wed" },
-      "thu": { "name": "Thu" },
-      "fri": { "name": "Fri" },
-      "sat": { "name": "Sat" },
-      "sun": { "name": "Sun" }
+      "mon": { "name": "Enable Mon" },
+      "tue": { "name": "Enable Tue" },
+      "wed": { "name": "Enable Wed" },
+      "thu": { "name": "Enable Thu" },
+      "fri": { "name": "Enable Fri" },
+      "sat": { "name": "Enable Sat" },
+      "sun": { "name": "Enable Sun" }
     },
     "time": {
       "alarm_time": { "name": "Alarm Time" }

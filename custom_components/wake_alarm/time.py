@@ -5,6 +5,7 @@ from datetime import time as dt_time
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -24,6 +25,7 @@ class WakeAlarmAlarmTime(WakeAlarmEntity, TimeEntity, RestoreEntity):
     """Alarm time-of-day. 24-hour, no seconds in UI but stored to second precision."""
 
     _attr_translation_key = "alarm_time"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, entry: ConfigEntry) -> None:
         super().__init__(entry, key="alarm_time", platform="time")

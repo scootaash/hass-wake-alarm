@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -74,6 +74,8 @@ async def async_setup_entry(
 
 class WakeAlarmNumber(WakeAlarmEntity, RestoreNumber):
     """Generic number entity restoring its last value across restarts."""
+
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, entry: ConfigEntry, spec: _Spec) -> None:
         super().__init__(entry, key=spec.key, platform="number")
