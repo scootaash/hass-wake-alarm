@@ -48,6 +48,7 @@ from .const import (
     STATE_RAMPING,
     STATE_SNOOZING,
 )
+from ._pure import compute_next_fire
 from .light_ramp import async_run_light_ramp
 from .music_sequence import async_run_music_sequence
 from .notifications import (
@@ -234,19 +235,7 @@ class WakeAlarmCoordinator:
         enabled_days = self._read_enabled_days()
         if not enabled_days:
             return None
-
-        now = dt_util.now()
-        today_at = now.replace(
-            hour=alarm_time.hour,
-            minute=alarm_time.minute,
-            second=alarm_time.second,
-            microsecond=0,
-        )
-        for offset in range(0, 8):
-            candidate = today_at + timedelta(days=offset)
-            if candidate.weekday() in enabled_days and candidate > now:
-                return candidate
-        return None
+        return compute_next_fire(dt_util.now(), alarm_time, enabled_days)
 
     # -------------------- fire callback --------------------
 
