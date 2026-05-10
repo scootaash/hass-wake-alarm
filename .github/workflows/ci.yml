@@ -56,5 +56,5 @@ jobs:
 
       - name: Verify committed bundle is up to date with source
         run: |
-          git diff --exit-code ../www/wake-alarm-card.js \
-            || (echo "::error::www/wake-alarm-card.js is stale. Run 'npm run build' inside card/ and commit the result." && exit 1)
+          git diff --exit-code ../custom_components/wake_alarm/www/wake-alarm-card.js \
+            || (echo "::error::custom_components/wake_alarm/www/wake-alarm-card.js is stale. Run 'npm run build' inside card/ and commit the result." && exit 1)
