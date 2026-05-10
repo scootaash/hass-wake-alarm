@@ -23,13 +23,13 @@ function makeEntry(
 
 const FULL_REGISTRY: EntityRegistryEntry[] = [
   makeEntry("switch.bedroom_enabled", `${ENTRY}_enabled`),
-  makeEntry("switch.bedroom_mon", `${ENTRY}_mon`),
-  makeEntry("switch.bedroom_tue", `${ENTRY}_tue`),
-  makeEntry("switch.bedroom_wed", `${ENTRY}_wed`),
-  makeEntry("switch.bedroom_thu", `${ENTRY}_thu`),
-  makeEntry("switch.bedroom_fri", `${ENTRY}_fri`),
-  makeEntry("switch.bedroom_sat", `${ENTRY}_sat`),
-  makeEntry("switch.bedroom_sun", `${ENTRY}_sun`),
+  makeEntry("switch.bedroom_d1_mon", `${ENTRY}_d1_mon`),
+  makeEntry("switch.bedroom_d2_tue", `${ENTRY}_d2_tue`),
+  makeEntry("switch.bedroom_d3_wed", `${ENTRY}_d3_wed`),
+  makeEntry("switch.bedroom_d4_thu", `${ENTRY}_d4_thu`),
+  makeEntry("switch.bedroom_d5_fri", `${ENTRY}_d5_fri`),
+  makeEntry("switch.bedroom_d6_sat", `${ENTRY}_d6_sat`),
+  makeEntry("switch.bedroom_d7_sun", `${ENTRY}_d7_sun`),
   makeEntry("time.bedroom_alarm_time", `${ENTRY}_alarm_time`),
   makeEntry("number.bedroom_length_min", `${ENTRY}_length_min`),
   makeEntry("number.bedroom_start_kelvin", `${ENTRY}_start_kelvin`),
@@ -58,8 +58,8 @@ describe("buildRelated", () => {
     expect(r.enabled).toBe("switch.bedroom_enabled");
     expect(r.alarmTime).toBe("time.bedroom_alarm_time");
     expect(r.active).toBe("binary_sensor.bedroom_active");
-    expect(r.days.mon).toBe("switch.bedroom_mon");
-    expect(r.days.sun).toBe("switch.bedroom_sun");
+    expect(r.days.mon).toBe("switch.bedroom_d1_mon");
+    expect(r.days.sun).toBe("switch.bedroom_d7_sun");
     expect(r.numbers.start_kelvin).toBe("number.bedroom_start_kelvin");
     expect(r.numbers.auto_dismiss_min).toBe("number.bedroom_auto_dismiss_min");
     expect(r.buttons.snooze).toBe("button.bedroom_snooze");

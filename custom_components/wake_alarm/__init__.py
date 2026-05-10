@@ -7,8 +7,14 @@ from pathlib import Path
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    CONF_SLUG,
+    DAY_KEY_MIGRATION,
+    DOMAIN,
+    PLATFORMS,
+)
 from .coordinator import WakeAlarmCoordinator
 from .services import async_setup_services, async_unload_services
 
@@ -61,6 +67,54 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload entry when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_migrate_entry(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> bool:
+    """Migrate config entries to the current schema.
+
+    v1 → v2: day-toggle entity keys renamed mon..sun → d1_mon..d7_sun
+    so HA's alphabetical entity sort displays them in calendar order.
+    Both unique_id and entity_id are updated in the entity registry; on/off
+    state may reset to the default_on value (Mon-Fri on, Sat/Sun off) since
+    RestoreEntity is keyed by entity_id and we are renaming it.
+    """
+    if entry.version > 2:
+        _LOGGER.error(
+            "wake_alarm config entry %s is at version %s, cannot downgrade",
+            entry.title,
+            entry.version,
+        )
+        return False
+
+    if entry.version == 1:
+        registry = er.async_get(hass)
+        slug = entry.data.get(CONF_SLUG, "")
+        for old_key, new_key in DAY_KEY_MIGRATION.items():
+            old_unique = f"{entry.entry_id}_{old_key}"
+            entity_id = registry.async_get_entity_id(
+                "switch", DOMAIN, old_unique
+            )
+            if entity_id is None:
+                continue
+            new_unique = f"{entry.entry_id}_{new_key}"
+            new_entity_id = f"switch.{slug}_{new_key}" if slug else None
+            registry.async_update_entity(
+                entity_id,
+                new_unique_id=new_unique,
+                **(
+                    {"new_entity_id": new_entity_id}
+                    if new_entity_id
+                    else {}
+                ),
+            )
+            _LOGGER.info(
+                "wake_alarm migration v1→v2: %s → %s", entity_id, new_entity_id
+            )
+        hass.config_entries.async_update_entry(entry, version=2)
+
+    return True
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
