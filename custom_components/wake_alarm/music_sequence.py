@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import TYPE_CHECKING
 
 from homeassistant.components.media_player import MediaPlayerEntityFeature
@@ -52,6 +53,15 @@ _FADE_STEPS = 20
 _UNJOIN_SETTLE_SEC = 3
 _JOIN_SETTLE_SEC = 1
 _PLAY_QUEUE_SETTLE_SEC = 5
+# Random track-skip range after play_media. Sonos shuffle reorders the
+# queue but doesn't pick a random *starting* track, so without an
+# explicit skip every alarm plays the same first track from the
+# favourite. 1..4 skips matches the dead-code intent in the legacy YAML.
+_MIN_RANDOM_SKIPS = 1
+_MAX_RANDOM_SKIPS = 4
+# Pause between consecutive next-track calls — Sonos rejects requests
+# arriving too quickly back-to-back.
+_RANDOM_SKIP_INTERVAL_SEC = 0.3
 
 
 async def async_run_music_sequence(
@@ -223,7 +233,13 @@ async def _run_multi_player_sonos(
     if await _interruptible_sleep(_PLAY_QUEUE_SETTLE_SEC, cancel_event):
         return
 
-    # 11. synchronous fade across all members
+    # 11. Random track-skip so neither the first alarm of the day nor any
+    # subsequent snooze starts on the same track. Each next-track call
+    # advances the (shuffled) queue by one; combined with shuffle, this
+    # yields a uniformly random starting point each fire.
+    await _random_skip(coordinator, group_coord, cancel_event)
+
+    # 12. synchronous fade across all members
     await _fade(coordinator, players, 0.0, target_volume, fade_sec, cancel_event)
 
 
@@ -253,6 +269,26 @@ async def _fade(
         v = round(max(0.0, min(1.0, raw)), 2)
         await asyncio.gather(*(_volume_set(coordinator, p, v) for p in players))
         if await _interruptible_sleep(step_delay, cancel_event):
+            return
+
+
+async def _random_skip(
+    coordinator: "WakeAlarmCoordinator",
+    group_coord: str,
+    cancel_event: asyncio.Event,
+) -> None:
+    """Advance the queue by a random 1..4 next-track calls."""
+    skips = random.randint(_MIN_RANDOM_SKIPS, _MAX_RANDOM_SKIPS)
+    for _ in range(skips):
+        if cancel_event.is_set():
+            return
+        await coordinator.hass.services.async_call(
+            "media_player",
+            "media_next_track",
+            {"entity_id": group_coord},
+            blocking=False,
+        )
+        if await _interruptible_sleep(_RANDOM_SKIP_INTERVAL_SEC, cancel_event):
             return
 
 

@@ -43,6 +43,14 @@ Audit-driven cleanup pass. All changes are backwards-compatible; bumped to
 
 ### Changed
 
+- **Multi-Sonos: random track-skip on every fire and snooze resume.**
+  Sonos shuffle only reorders the queue; it doesn't pick a random
+  starting track, so every alarm and every snooze used to begin on the
+  same track from the configured favourite. The music sequence now
+  skips 1–4 tracks forward (`media_next_track`, random per fire) after
+  the 5-second queue settle and before the fade, so the wake-up song
+  is genuinely different each cycle. Single-player path is unchanged
+  (it doesn't shuffle in the first place; can revisit if needed).
 - **Volume slider displays as percentage (0–100%)** instead of the raw
   0.0–1.0 fraction. The underlying `number.<slug>_volume` entity still
   stores 0.0–1.0; the card does the multiply/divide.
