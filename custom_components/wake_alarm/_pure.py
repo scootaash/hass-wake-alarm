@@ -78,10 +78,17 @@ def build_action_id(action: str, entry_id: str) -> str:
 
 
 def parse_action_id(action: str) -> tuple[str, str] | None:
-    """Inverse of build_action_id. Returns (action, entry_id) or None."""
+    """Inverse of build_action_id. Returns (action, entry_id) or None.
+
+    Rejects malformed strings: missing prefix, fewer than three parts, or
+    either part empty.
+    """
     if not action.startswith(_ACTION_PREFIX):
         return None
     parts = action.split(":", 2)
     if len(parts) != 3:
         return None
-    return parts[1], parts[2]
+    action_name, entry_id = parts[1], parts[2]
+    if not action_name or not entry_id:
+        return None
+    return action_name, entry_id

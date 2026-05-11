@@ -4,6 +4,93 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.3.0 — 2026-05-11
+
+Audit-driven cleanup pass. All changes are backwards-compatible; bumped to
+0.3.0 because the volume of fixes is more than a patch warrants.
+
+### Fixed
+
+- **Schedule never rearmed after a natural fire.** When the alarm ran end-
+  to-end (ramp completes naturally → music plays to fade-up → music
+  completes), the coordinator dropped to IDLE but never called
+  `async_recompute_schedule`. Result: `sensor.<slug>_next_alarm` kept
+  pointing at the just-fired (past) time and no `async_track_point_in_time`
+  was armed for the next day until the user poked a dependency. Same root
+  cause covered the early-return branches of `_async_on_music_start`
+  (player unavailable / no media). `_set_state(STATE_IDLE)` now triggers
+  the recompute on every transition into IDLE, regardless of how IDLE was
+  reached.
+- **Auto-dismiss timer was re-armed on every snooze resume.** Each cycle
+  restarted the timer at `auto_dismiss_min` from the resume moment, so
+  three snoozes effectively extended auto-dismiss by `3 × snooze_min`.
+  The deadline is now captured at the first PLAYING transition and
+  preserved across snooze cycles — N minutes after the alarm originally
+  fired always means N minutes.
+- **Tapping the mode tile during snooze disarmed the alarm.** The tile
+  showed `Music in M:SS` and tapping disabled `switch.<slug>_enabled`.
+  Mode-tile tap is now a no-op while the alarm is active (ramping,
+  playing, or snoozing); Snooze / Dismiss / Cancel ramp are the explicit
+  controls.
+- **Card instance-name was locale-fragile** — it parsed the enabled-
+  switch's `friendly_name` and stripped a literal "Enabled" suffix, which
+  only works in English. `sensor.<slug>_next_alarm` now carries the
+  user-given instance name as an `instance_name` attribute and the card
+  reads it from there.
+- **`parse_action_id` accepted empty entry_ids.** `wake_alarm:snooze:` was
+  parsed as `("snooze", "")`, which could never resolve to a coordinator.
+  Now rejected.
+
+### Changed
+
+- **Multi-Sonos: random track-skip on every fire and snooze resume.**
+  Sonos shuffle only reorders the queue; it doesn't pick a random
+  starting track, so every alarm and every snooze used to begin on the
+  same track from the configured favourite. The music sequence now
+  skips 1–4 tracks forward (`media_next_track`, random per fire) after
+  the 5-second queue settle and before the fade, so the wake-up song
+  is genuinely different each cycle. Single-player path is unchanged
+  (it doesn't shuffle in the first place; can revisit if needed).
+- **Volume slider displays as percentage (0–100%)** instead of the raw
+  0.0–1.0 fraction. The underlying `number.<slug>_volume` entity still
+  stores 0.0–1.0; the card does the multiply/divide.
+- **Cancel-ramp button visible on the main view during ramping** — used
+  to be settings-only. Snooze / Dismiss are still always visible while
+  active.
+- **Card ticker only runs during snooze.** The 1Hz `requestUpdate` that
+  drives the countdown used to run for the lifetime of every dashboard;
+  it now starts when state transitions to SNOOZING and stops afterward.
+- **`async_call_light_turn_on` is now properly async** (was a non-async
+  def returning a coroutine — worked but read oddly).
+
+### Docs
+
+- `LICENSE` is now an actual MIT licence instead of an empty file.
+- `BRIEF.md` day-toggle entity IDs updated to the v2 `d1_mon`..`d7_sun`
+  scheme.
+
+## 0.2.3 — 2026-05-11
+
+### Fixed
+
+- **Card editor's "Save" wrote the wrong entity.** `getStubConfig`
+  was scanning `hass.states` for the first `switch.*_enabled` it
+  found and could pick something like `switch.sonos_lounge_subwoofer_enabled`
+  (the Sonos subwoofer's enabled toggle). The dropdown rendered the
+  filtered wake_alarm options correctly so the user saw the right
+  selection, but the underlying config still held the bad stub
+  until they actively re-picked.
+
+  `getStubConfig` is now async and consults the entity registry
+  (`config/entity_registry/list` with `platform === "wake_alarm"`)
+  to pick a real wake_alarm enabled-switch — no false positives from
+  similarly-named entities in other integrations.
+
+  The editor also self-heals: when it loads, if the current
+  `_config.entity` isn't in the filtered wake_alarm list, it clears
+  it and pushes the change back via `config-changed`, so a stale
+  stub from an earlier card version can't survive into Save.
+
 ## 0.2.2 — 2026-05-11
 
 ### Fixed

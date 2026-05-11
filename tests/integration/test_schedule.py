@@ -99,4 +99,9 @@ class TestActionId:
     def test_rejects_too_few_parts(self, pure: ModuleType) -> None:
         assert pure.parse_action_id("wake_alarm:snooze") is None
         assert pure.parse_action_id("wake_alarm:") is None
-        assert pure.parse_action_id("wake_alarm:snooze:") == ("snooze", "")
+
+    def test_rejects_empty_entry_id(self, pure: ModuleType) -> None:
+        # An empty entry_id can never resolve to a coordinator, so treat it
+        # as malformed rather than parsing as ("snooze", "").
+        assert pure.parse_action_id("wake_alarm:snooze:") is None
+        assert pure.parse_action_id("wake_alarm::abc") is None

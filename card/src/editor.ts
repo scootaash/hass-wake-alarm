@@ -34,6 +34,26 @@ export class WakeAlarmCardEditor extends LitElement {
         )
         .map((e) => e.entity_id)
         .sort();
+
+      // Self-heal: if the incoming config (e.g. a bad stub from an older
+      // build) points to an entity that isn't actually a wake_alarm
+      // enabled-switch, clear it so the user has to pick a valid one
+      // before saving. Push the cleared config back via config-changed
+      // so the parent editor preview matches what's saved.
+      if (
+        this._config?.entity &&
+        !this._enabledSwitches.includes(this._config.entity)
+      ) {
+        const cleared = { ...this._config, entity: "" };
+        this._config = cleared;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: cleared },
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      }
     } catch (e) {
       this._loadError = `${e}`;
     }

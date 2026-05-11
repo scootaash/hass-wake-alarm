@@ -60,16 +60,33 @@ export class WakeAlarmCard extends LitElement {
     return document.createElement("wake-alarm-card-editor");
   }
 
-  public static getStubConfig(hass?: HomeAssistant): WakeAlarmCardConfig {
-    // Try to default to the first wake_alarm enabled-switch in scope so
-    // the card renders something meaningful immediately. Falls back to
-    // empty if we can't find one (e.g. before the integration has any
-    // entries).
-    const states = hass?.states ?? {};
-    const candidate = Object.keys(states).find(
-      (id) => id.startsWith("switch.") && id.endsWith("_enabled"),
-    );
-    return { type: "custom:wake-alarm-card", entity: candidate ?? "" };
+  public static async getStubConfig(
+    hass?: HomeAssistant,
+  ): Promise<WakeAlarmCardConfig> {
+    // Look up the first real wake_alarm enabled-switch via the entity
+    // registry so the stub picks something actually compatible — naive
+    // hass.states matching on `switch.*_enabled` also grabs things like
+    // Sonos subwoofer-enabled switches, which then fail resolution on save.
+    if (!hass) {
+      return { type: "custom:wake-alarm-card", entity: "" };
+    }
+    try {
+      const entries = await hass.callWS<EntityRegistryEntry[]>({
+        type: "config/entity_registry/list",
+      });
+      const candidate = entries.find(
+        (e) =>
+          e.platform === "wake_alarm" &&
+          (e.unique_id ?? "").endsWith("_enabled") &&
+          (e.entity_id ?? "").startsWith("switch."),
+      );
+      return {
+        type: "custom:wake-alarm-card",
+        entity: candidate?.entity_id ?? "",
+      };
+    } catch {
+      return { type: "custom:wake-alarm-card", entity: "" };
+    }
   }
 
   protected willUpdate(_changed: PropertyValues): void {
@@ -147,7 +164,7 @@ window.customCards.push({
 
 // eslint-disable-next-line no-console
 console.info(
-  "%c WAKE-ALARM-CARD %c v0.2.2 ",
+  "%c WAKE-ALARM-CARD %c v0.3.0 ",
   "color: white; background: #ff5722; font-weight: 700;",
   "color: #ff5722; background: white; font-weight: 700;",
 );
