@@ -43,6 +43,14 @@ const FULL_REGISTRY: EntityRegistryEntry[] = [
   makeEntry("button.bedroom_test_light_ramp", `${ENTRY}_test_light_ramp`),
   makeEntry("button.bedroom_cancel_ramp", `${ENTRY}_cancel_ramp`),
   makeEntry("button.bedroom_test_music", `${ENTRY}_test_music`),
+  makeEntry(
+    "button.bedroom_test_standard_notification",
+    `${ENTRY}_test_standard_notification`,
+  ),
+  makeEntry(
+    "button.bedroom_test_urgent_notification",
+    `${ENTRY}_test_urgent_notification`,
+  ),
   makeEntry("button.bedroom_dismiss", `${ENTRY}_dismiss`),
   makeEntry("button.bedroom_snooze", `${ENTRY}_snooze`),
   makeEntry("sensor.bedroom_next_alarm", `${ENTRY}_next_alarm`),

@@ -87,3 +87,24 @@ test_music:
   target:
     entity:
       integration: wake_alarm
+
+test_standard_notification:
+  name: Test standard notification
+  description: >
+    Send the standard alarm notification right now so you can verify
+    the configured notify target, sound, and on-device interruption
+    level (iOS active / Android default channel).
+  target:
+    entity:
+      integration: wake_alarm
+
+test_urgent_notification:
+  name: Test urgent notification
+  description: >
+    Send the urgent fallback notification right now. Uses the iOS
+    critical-alert sound + critical interruption level and the Android
+    wake_alarm_urgent channel so you can verify a distinct alert sound
+    versus the standard notification.
+  target:
+    entity:
+      integration: wake_alarm

@@ -571,6 +571,29 @@ class WakeAlarmCoordinator:
         _LOGGER.info("auto-dismiss firing for %s", self.slug)
         await self.async_dismiss()
 
+    # -------------------- test notifications --------------------
+
+    async def async_test_standard_notification(self) -> None:
+        """Fire the standard alarm notification with current settings.
+
+        Lets the user verify their notify target + sound + interruption
+        level on the actual device without scheduling an alarm.
+        """
+        await async_send_standard(self)
+
+    async def async_test_urgent_notification(self) -> None:
+        """Fire the urgent (critical) notification with current settings.
+
+        Uses the first configured media player as the unavailable target
+        so the message reads realistically; falls back to a placeholder
+        if no players are configured.
+        """
+        players = list(
+            self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
+        )
+        target_ids = players[:1] if players else ["media_player.example"]
+        await async_send_player_unavailable(self, target_ids)
+
     # -------------------- media selection --------------------
 
     @callback

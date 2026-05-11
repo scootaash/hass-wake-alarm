@@ -5,6 +5,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -70,8 +71,14 @@ class WakeAlarmDaySwitch(_RestorableSwitch):
 
     entity_key is the d1_mon..d7_sun key embedded in the entity_id and
     unique_id; translation_key is the short label ("mon"..."sun") that
-    strings.json maps to the user-visible "Mon"..."Sun".
+    strings.json maps to the user-visible "Enable Mon"..."Enable Sun".
+
+    entity_category=CONFIG groups the seven day toggles under HA's
+    "Configuration" section on the device card, away from the master
+    enable / status / action surfaces.
     """
+
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
