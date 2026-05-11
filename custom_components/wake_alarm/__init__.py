@@ -1,6 +1,7 @@
 """The Wake Alarm integration."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -23,8 +24,9 @@ _LOGGER = logging.getLogger(__name__)
 # The card bundle ships inside the integration so the user only has to
 # install the repo once (HACS Integration). The integration registers the
 # bundle as a static path at this URL and tells the frontend to load it.
-_CARD_URL = "/wake_alarm/wake-alarm-card.js"
+_CARD_PATH_PART = "/wake_alarm/wake-alarm-card.js"
 _CARD_PATH = Path(__file__).parent / "www" / "wake-alarm-card.js"
+_MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 
 # Bookkeeping key inside hass.data[DOMAIN]; underscore-prefixed so the
 # entry-id lookup ignores it.
@@ -117,12 +119,25 @@ async def async_migrate_entry(
     return True
 
 
+def _read_integration_version() -> str:
+    """Return the integration's manifest version, falling back to 'dev'."""
+    try:
+        with _MANIFEST_PATH.open(encoding="utf-8") as f:
+            return str(json.load(f).get("version", "dev"))
+    except OSError:
+        return "dev"
+
+
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Serve the Lovelace card bundle and auto-register it as a frontend resource.
 
     Means a single HACS install (Integration category) is enough — the user
     does not have to add the same repo a second time as Dashboard, and does
     not have to register the URL in Settings → Dashboards → Resources.
+
+    The URL we register with the frontend includes a ?v=<integration version>
+    cache-bust suffix; the static path itself remains version-less, so
+    browsers reliably fetch a fresh bundle when the integration is updated.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(_CARD_REGISTERED_KEY):
@@ -140,11 +155,13 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         from homeassistant.components.http import StaticPathConfig
 
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(_CARD_URL, str(_CARD_PATH), True)]
+            [StaticPathConfig(_CARD_PATH_PART, str(_CARD_PATH), True)]
         )
     else:
-        hass.http.register_static_path(_CARD_URL, str(_CARD_PATH), True)
+        hass.http.register_static_path(_CARD_PATH_PART, str(_CARD_PATH), True)
 
-    add_extra_js_url(hass, _CARD_URL)
+    version = _read_integration_version()
+    versioned_url = f"{_CARD_PATH_PART}?v={version}"
+    add_extra_js_url(hass, versioned_url)
     domain_data[_CARD_REGISTERED_KEY] = True
-    _LOGGER.info("registered wake-alarm-card at %s", _CARD_URL)
+    _LOGGER.info("registered wake-alarm-card at %s", versioned_url)
