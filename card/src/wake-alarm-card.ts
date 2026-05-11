@@ -34,15 +34,20 @@ export class WakeAlarmCard extends LitElement {
   @state() private _resolveError?: string;
 
   public setConfig(config: WakeAlarmCardConfig): void {
-    if (!config?.entity) {
-      throw new Error("wake-alarm-card: `entity` is required.");
-    }
-    if (!config.entity.startsWith("switch.")) {
+    // Allow incomplete config (e.g. the stub HA hands us when the user
+    // first picks the card from the "Add Card" list). The editor pushes
+    // a valid `entity` before the user can save, and render() short-
+    // circuits with a "pick an entity" placeholder until then.
+    if (
+      config?.entity &&
+      !config.entity.startsWith("switch.")
+    ) {
       throw new Error(
         "wake-alarm-card: `entity` must be a switch (the wake_alarm enabled switch).",
       );
     }
-    this._config = config;
+    this._config =
+      config ?? ({ type: "custom:wake-alarm-card", entity: "" } as WakeAlarmCardConfig);
     this._related = undefined;
     this._resolveError = undefined;
   }
@@ -55,14 +60,22 @@ export class WakeAlarmCard extends LitElement {
     return document.createElement("wake-alarm-card-editor");
   }
 
-  public static getStubConfig(): WakeAlarmCardConfig {
-    return { type: "custom:wake-alarm-card", entity: "" };
+  public static getStubConfig(hass?: HomeAssistant): WakeAlarmCardConfig {
+    // Try to default to the first wake_alarm enabled-switch in scope so
+    // the card renders something meaningful immediately. Falls back to
+    // empty if we can't find one (e.g. before the integration has any
+    // entries).
+    const states = hass?.states ?? {};
+    const candidate = Object.keys(states).find(
+      (id) => id.startsWith("switch.") && id.endsWith("_enabled"),
+    );
+    return { type: "custom:wake-alarm-card", entity: candidate ?? "" };
   }
 
   protected willUpdate(_changed: PropertyValues): void {
     if (
       this.hass &&
-      this._config &&
+      this._config?.entity &&
       !this._related &&
       !this._resolveError
     ) {
@@ -88,6 +101,12 @@ export class WakeAlarmCard extends LitElement {
 
   protected render(): TemplateResult {
     if (!this._config) return html``;
+    if (!this._config.entity) {
+      // First-time "Add Card" path before the visual editor has run.
+      return html`<ha-card><div class="loading">
+        Pick a Wake Alarm enabled-switch in the visual editor.
+      </div></ha-card>`;
+    }
     if (this._resolveError) {
       return html`<ha-card><div class="error">${this._resolveError}</div></ha-card>`;
     }
@@ -128,7 +147,7 @@ window.customCards.push({
 
 // eslint-disable-next-line no-console
 console.info(
-  "%c WAKE-ALARM-CARD %c v0.2.1 ",
+  "%c WAKE-ALARM-CARD %c v0.2.2 ",
   "color: white; background: #ff5722; font-weight: 700;",
   "color: #ff5722; background: white; font-weight: 700;",
 );

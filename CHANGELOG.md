@@ -4,6 +4,20 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 — 2026-05-11
+
+### Fixed
+
+- **Card couldn't be added via "Add Card"** — the visual-editor flow
+  hands `setConfig` an empty stub (`entity: ""`) before the user has
+  picked one, and the previous strict validator threw, leaving the
+  card preview hung on a spinner. `setConfig` now accepts an empty
+  entity; the card renders a "Pick a Wake Alarm enabled-switch in the
+  visual editor" placeholder until the editor pushes a real value.
+- **`getStubConfig` now seeds a sensible default** by scanning
+  `hass.states` for the first `switch.*_enabled`, so the card preview
+  is meaningful from the moment the user picks it from the card list.
+
 ## 0.2.1 — 2026-05-10
 
 ### Fixed
