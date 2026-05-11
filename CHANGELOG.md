@@ -4,6 +4,28 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.2.3 — 2026-05-11
+
+### Fixed
+
+- **Card editor's "Save" wrote the wrong entity.** `getStubConfig`
+  was scanning `hass.states` for the first `switch.*_enabled` it
+  found and could pick something like `switch.sonos_lounge_subwoofer_enabled`
+  (the Sonos subwoofer's enabled toggle). The dropdown rendered the
+  filtered wake_alarm options correctly so the user saw the right
+  selection, but the underlying config still held the bad stub
+  until they actively re-picked.
+
+  `getStubConfig` is now async and consults the entity registry
+  (`config/entity_registry/list` with `platform === "wake_alarm"`)
+  to pick a real wake_alarm enabled-switch — no false positives from
+  similarly-named entities in other integrations.
+
+  The editor also self-heals: when it loads, if the current
+  `_config.entity` isn't in the filtered wake_alarm list, it clears
+  it and pushes the change back via `config-changed`, so a stale
+  stub from an earlier card version can't survive into Save.
+
 ## 0.2.2 — 2026-05-11
 
 ### Fixed
