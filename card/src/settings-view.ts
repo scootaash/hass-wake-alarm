@@ -11,6 +11,11 @@ interface NumberSpec {
   min: number;
   max: number;
   step: number;
+  /** Multiplier applied when *displaying* the entity value. The slider's
+   *  min/max/step refer to the displayed value; the underlying entity is
+   *  written as displayedValue / displayMultiplier on change. Use this to
+   *  show 0–1.0 entities as percentages. */
+  displayMultiplier?: number;
 }
 
 const SLIDERS: NumberSpec[] = [
@@ -46,9 +51,10 @@ const SLIDERS: NumberSpec[] = [
   },
   {
     key: "volume",
-    label: "Alarm Volume (0–1)",
-    description: "Final volume the music fades up to. Defaults capped low to prevent accidents.",
-    min: 0, max: 1, step: 0.01,
+    label: "Alarm Volume (%)",
+    description: "Final volume the music fades up to. Defaults to a low value so test plays don't blast.",
+    min: 0, max: 100, step: 1,
+    displayMultiplier: 100,
   },
   {
     key: "music_fade_sec",
@@ -191,10 +197,14 @@ export class WakeAlarmSettingsView extends LitElement {
     if (!this.hass || !this.related) return html``;
     const id = this.related.numbers[spec.key];
     const raw = this.hass.states[id]?.state;
-    const val = raw && !["unknown", "unavailable"].includes(raw)
-      ? Number(raw)
-      : spec.min;
-    const display = spec.step >= 1 ? val.toFixed(0) : val.toFixed(2);
+    const entityVal =
+      raw && !["unknown", "unavailable"].includes(raw)
+        ? Number(raw)
+        : spec.min / (spec.displayMultiplier ?? 1);
+    const multiplier = spec.displayMultiplier ?? 1;
+    const displayedVal = entityVal * multiplier;
+    const display =
+      spec.step >= 1 ? displayedVal.toFixed(0) : displayedVal.toFixed(2);
     return html`
       <div class="slider-row">
         <div class="slider-head">
@@ -207,19 +217,20 @@ export class WakeAlarmSettingsView extends LitElement {
           min=${spec.min}
           max=${spec.max}
           step=${spec.step}
-          .value=${String(val)}
-          @change=${(ev: Event) => this._setNumber(id, ev)}
+          .value=${String(displayedVal)}
+          @change=${(ev: Event) => this._setNumber(id, ev, multiplier)}
         />
       </div>
     `;
   }
 
-  private _setNumber(entityId: string, ev: Event): void {
+  private _setNumber(entityId: string, ev: Event, multiplier: number): void {
     if (!this.hass) return;
-    const v = Number((ev.target as HTMLInputElement).value);
+    const displayed = Number((ev.target as HTMLInputElement).value);
+    const entityValue = displayed / multiplier;
     void this.hass.callService("number", "set_value", {
       entity_id: entityId,
-      value: v,
+      value: entityValue,
     });
   }
 

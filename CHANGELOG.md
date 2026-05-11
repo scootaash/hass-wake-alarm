@@ -4,6 +4,63 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.3.0 — 2026-05-11
+
+Audit-driven cleanup pass. All changes are backwards-compatible; bumped to
+0.3.0 because the volume of fixes is more than a patch warrants.
+
+### Fixed
+
+- **Schedule never rearmed after a natural fire.** When the alarm ran end-
+  to-end (ramp completes naturally → music plays to fade-up → music
+  completes), the coordinator dropped to IDLE but never called
+  `async_recompute_schedule`. Result: `sensor.<slug>_next_alarm` kept
+  pointing at the just-fired (past) time and no `async_track_point_in_time`
+  was armed for the next day until the user poked a dependency. Same root
+  cause covered the early-return branches of `_async_on_music_start`
+  (player unavailable / no media). `_set_state(STATE_IDLE)` now triggers
+  the recompute on every transition into IDLE, regardless of how IDLE was
+  reached.
+- **Auto-dismiss timer was re-armed on every snooze resume.** Each cycle
+  restarted the timer at `auto_dismiss_min` from the resume moment, so
+  three snoozes effectively extended auto-dismiss by `3 × snooze_min`.
+  The deadline is now captured at the first PLAYING transition and
+  preserved across snooze cycles — N minutes after the alarm originally
+  fired always means N minutes.
+- **Tapping the mode tile during snooze disarmed the alarm.** The tile
+  showed `Music in M:SS` and tapping disabled `switch.<slug>_enabled`.
+  Mode-tile tap is now a no-op while the alarm is active (ramping,
+  playing, or snoozing); Snooze / Dismiss / Cancel ramp are the explicit
+  controls.
+- **Card instance-name was locale-fragile** — it parsed the enabled-
+  switch's `friendly_name` and stripped a literal "Enabled" suffix, which
+  only works in English. `sensor.<slug>_next_alarm` now carries the
+  user-given instance name as an `instance_name` attribute and the card
+  reads it from there.
+- **`parse_action_id` accepted empty entry_ids.** `wake_alarm:snooze:` was
+  parsed as `("snooze", "")`, which could never resolve to a coordinator.
+  Now rejected.
+
+### Changed
+
+- **Volume slider displays as percentage (0–100%)** instead of the raw
+  0.0–1.0 fraction. The underlying `number.<slug>_volume` entity still
+  stores 0.0–1.0; the card does the multiply/divide.
+- **Cancel-ramp button visible on the main view during ramping** — used
+  to be settings-only. Snooze / Dismiss are still always visible while
+  active.
+- **Card ticker only runs during snooze.** The 1Hz `requestUpdate` that
+  drives the countdown used to run for the lifetime of every dashboard;
+  it now starts when state transitions to SNOOZING and stops afterward.
+- **`async_call_light_turn_on` is now properly async** (was a non-async
+  def returning a coroutine — worked but read oddly).
+
+### Docs
+
+- `LICENSE` is now an actual MIT licence instead of an empty file.
+- `BRIEF.md` day-toggle entity IDs updated to the v2 `d1_mon`..`d7_sun`
+  scheme.
+
 ## 0.2.3 — 2026-05-11
 
 ### Fixed

@@ -10,15 +10,34 @@ export class WakeAlarmMainView extends LitElement {
 
   private _tickInterval?: number;
 
-  connectedCallback(): void {
-    super.connectedCallback();
-    // Re-render every second so the snooze countdown ticks. Cheap; the
-    // template only emits new strings, no DOM rewiring.
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._stopTicker();
+  }
+
+  protected updated(): void {
+    // Only tick while we're actually showing a snooze countdown. Stops
+    // a 1Hz no-op render loop running for the lifetime of the card on
+    // every dashboard. Lifecycle: ticker starts the first render that
+    // sees fsmState==="snoozing" and stops the next render where it
+    // isn't (e.g. snooze finishes, dismiss, etc.).
+    const fsmState =
+      this.hass && this.related
+        ? this.hass.states[this.related.sensors.state]?.state
+        : undefined;
+    if (fsmState === "snoozing") {
+      this._startTicker();
+    } else {
+      this._stopTicker();
+    }
+  }
+
+  private _startTicker(): void {
+    if (this._tickInterval !== undefined) return;
     this._tickInterval = window.setInterval(() => this.requestUpdate(), 1000);
   }
 
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
+  private _stopTicker(): void {
     if (this._tickInterval !== undefined) {
       window.clearInterval(this._tickInterval);
       this._tickInterval = undefined;
@@ -72,7 +91,7 @@ export class WakeAlarmMainView extends LitElement {
           </ha-icon-button>
         </div>
 
-        <div class="mode-tile mode-${isEnabled ? fsmState : "off"}" @click=${this._toggleEnabled}>
+        <div class="mode-tile mode-${isEnabled ? fsmState : "off"}" @click=${this._handleModeTileClick}>
           <ha-icon icon=${modeIcon}></ha-icon>
           <div class="mode-text">
             <div class="mode-label">${modeLabel}</div>
@@ -106,7 +125,7 @@ export class WakeAlarmMainView extends LitElement {
           ${DAYS.map((d) => this._renderDayChip(d))}
         </div>
 
-        ${isActive ? this._renderActiveActions() : null}
+        ${isActive ? this._renderActiveActions(fsmState) : null}
       </ha-card>
     `;
   }
@@ -126,9 +145,17 @@ export class WakeAlarmMainView extends LitElement {
     `;
   }
 
-  private _renderActiveActions(): TemplateResult {
+  private _renderActiveActions(fsmState: string): TemplateResult {
     return html`
       <div class="action-row">
+        ${fsmState === "ramping"
+          ? html`
+              <button class="action-btn cancel-ramp" @click=${this._cancelRamp}>
+                <ha-icon icon="mdi:weather-sunset-down"></ha-icon>
+                <span>Cancel ramp</span>
+              </button>
+            `
+          : null}
         <button class="action-btn snooze" @click=${this._snooze}>
           <ha-icon icon="mdi:alarm-snooze"></ha-icon>
           <span>Snooze</span>
@@ -141,19 +168,39 @@ export class WakeAlarmMainView extends LitElement {
     `;
   }
 
+  private _cancelRamp = (): void => {
+    if (!this.hass || !this.related) return;
+    void this.hass.callService("button", "press", {
+      entity_id: this.related.buttons.cancel_ramp,
+    });
+  };
+
   private _instanceName(): string {
     if (!this.hass || !this.related) return "Wake Alarm";
-    // Friendly name of enabled switch is "<instance> Enabled" — strip suffix.
-    const name = this.hass.states[this.related.enabled]?.attributes?.friendly_name as
-      | string
-      | undefined;
-    if (!name) return "Wake Alarm";
-    return name.replace(/\s+Enabled$/, "");
+    // Integration mirrors the user-given name as an attribute on the
+    // next_alarm sensor — use that so the title is locale-safe (we used
+    // to strip /\s+Enabled$/ off the friendly_name which only worked in
+    // English).
+    const sensor = this.hass.states[this.related.sensors.next_alarm];
+    const name = sensor?.attributes?.instance_name as string | undefined;
+    return name && name.trim() ? name : "Wake Alarm";
   }
 
   private _toggleEnabled = (): void => {
     if (!this.hass || !this.related) return;
     void this.hass.callService("switch", "toggle", { entity_id: this.related.enabled });
+  };
+
+  private _handleModeTileClick = (): void => {
+    // While the alarm is active (ramping / playing / snoozing) tapping
+    // the mode tile shouldn't disarm the alarm — the user is likely
+    // reading a countdown or status, not trying to flip it off. The
+    // Snooze + Dismiss buttons (and Cancel ramp during ramping) handle
+    // those actions explicitly.
+    if (!this.hass || !this.related) return;
+    const fsm = this.hass.states[this.related.sensors.state]?.state;
+    if (fsm && fsm !== "idle") return;
+    this._toggleEnabled();
   };
 
   private _toggleDay(day: DayKey): void {
@@ -319,6 +366,10 @@ export class WakeAlarmMainView extends LitElement {
         color: rgb(255, 82, 82);
       }
       .action-btn.dismiss ha-icon { color: rgb(255, 82, 82); }
+      .action-btn.cancel-ramp {
+        background: rgba(255, 165, 0, 0.16);
+      }
+      .action-btn.cancel-ramp ha-icon { color: rgb(255, 165, 0); }
     `,
   ];
 }

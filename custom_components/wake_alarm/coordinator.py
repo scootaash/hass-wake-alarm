@@ -100,6 +100,11 @@ class WakeAlarmCoordinator:
         # Wall-clock target for the snooze finish; surfaced as a sensor
         # attribute so the card can show a countdown.
         self._snooze_finishes_at: datetime | None = None
+        # Wall-clock target for auto-dismiss. Captured at first PLAYING
+        # transition and preserved across snooze cycles, so the timer
+        # always elapses N minutes after the alarm originally fired —
+        # never extended by repeat snoozes.
+        self._auto_dismiss_deadline: datetime | None = None
 
         # Music-start callback scheduled from _async_on_fire
         self._cancel_music_start: CALLBACK_TYPE | None = None
@@ -523,8 +528,9 @@ class WakeAlarmCoordinator:
         self._cancel_auto_dismiss()
         self._cancel_pending_music_start()
 
+        # _set_state(STATE_IDLE) now handles the schedule recompute and
+        # auto-dismiss deadline clear, so we don't need explicit calls.
         self._set_state(STATE_IDLE)
-        self.async_recompute_schedule()
 
     @callback
     def _cancel_pending_music_start(self) -> None:
@@ -546,11 +552,18 @@ class WakeAlarmCoordinator:
             self._auto_dismiss_cancel = None
 
     @callback
+    def _clear_auto_dismiss_deadline(self) -> None:
+        """Drop the captured deadline so the next alarm fire starts fresh."""
+        self._auto_dismiss_deadline = None
+
+    @callback
     def _start_auto_dismiss_if_configured(self) -> None:
         """Arm the auto-dismiss timer if auto_dismiss_min > 0.
 
-        Cancels any prior timer first so this is safe to call on every
-        transition into PLAYING (initial fire and snooze-resume).
+        Captures the deadline at the first PLAYING transition and
+        preserves it across snooze cycles so the timer never gets
+        extended by repeat snoozes — N minutes always means N minutes
+        from when the alarm first fired.
         """
         self._cancel_auto_dismiss()
         minutes = int(
@@ -558,9 +571,17 @@ class WakeAlarmCoordinator:
         )
         if minutes <= 0:
             return
+        if self._auto_dismiss_deadline is None:
+            self._auto_dismiss_deadline = dt_util.now() + timedelta(minutes=minutes)
+        remaining = (self._auto_dismiss_deadline - dt_util.now()).total_seconds()
+        if remaining <= 0:
+            # Already past the deadline (e.g. a long snooze pushed us
+            # past it) — fire immediately.
+            self.hass.async_create_task(self.async_dismiss())
+            return
         self._auto_dismiss_cancel = async_call_later(
             self.hass,
-            minutes * 60,
+            remaining,
             self._async_auto_dismiss_fire,
         )
 
@@ -633,21 +654,21 @@ class WakeAlarmCoordinator:
 
     # -------------------- override detection --------------------
 
-    def async_call_light_turn_on(
+    async def async_call_light_turn_on(
         self,
         entity_ids: list[str],
         *,
         brightness_pct: int,
         kelvin: int,
-    ):
-        """Issue a tagged light.turn_on. Returns the awaitable from services.async_call.
+    ) -> None:
+        """Issue a tagged light.turn_on.
 
-        The Context is tracked so the light state listener can distinguish our
-        own changes from user overrides.
+        The Context is tracked so the light state listener can distinguish
+        our own changes from user overrides.
         """
         ctx = Context()
         self._track_context(ctx)
-        return self.hass.services.async_call(
+        await self.hass.services.async_call(
             "light",
             "turn_on",
             {
@@ -708,6 +729,14 @@ class WakeAlarmCoordinator:
         if self._state == new_state:
             return
         self._state = new_state
+        if new_state == STATE_IDLE:
+            # Always roll sensor.<slug>_next_alarm forward when we go idle —
+            # whether IDLE is reached via dismiss, ramp completion, music
+            # completion, or an aborted on-fire path. Previously this only
+            # happened on dismiss, so naturally-completed alarms left the
+            # sensor pointing at the just-past fire time.
+            self._clear_auto_dismiss_deadline()
+            self.async_recompute_schedule()
         self._notify_listeners()
 
     # -------------------- state readers --------------------

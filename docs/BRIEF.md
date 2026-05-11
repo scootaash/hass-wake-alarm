@@ -132,7 +132,7 @@ All entity IDs follow the pattern `<platform>.<slug>_<purpose>`. Entity friendly
 | Entity | Range | Default | Notes |
 |---|---|---|---|
 | `switch.<slug>_enabled` | bool | off at create | Master enable for this alarm |
-| `switch.<slug>_mon` to `_sun` | bool | weekdays on | Day-of-week toggles |
+| `switch.<slug>_d1_mon` to `_d7_sun` | bool | weekdays on | Day-of-week toggles (the `dN_` prefix keeps the alphabetical entity-id sort in calendar order; v1→v2 migration handled in `async_migrate_entry`) |
 | `time.<slug>_alarm_time` | time-of-day | 07:00 | HA `time` platform |
 | `number.<slug>_length_min` | 1 to 120, step 1 | 15 | Ramp length in minutes |
 | `number.<slug>_start_kelvin` | 1500 to 6500, step 50 | 1500 | Ramp start colour temperature |
