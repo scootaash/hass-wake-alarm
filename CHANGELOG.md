@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.2.1 — 2026-05-10
+
+### Fixed
+
+- **Card bundle was cached across updates.** The integration registered
+  the card at a static URL without a cache-busting suffix, so browsers
+  kept serving the previous bundle after an integration update. Now the
+  registered frontend URL includes `?v=<integration version>`, so each
+  release invalidates the cache automatically.
+
 ## 0.2.0 — 2026-05-10
 
 ### Added
