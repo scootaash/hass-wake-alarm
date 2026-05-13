@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / Discussion
+    url: https://github.com/scootaash/hass-wake-alarm/discussions
+    about: |
+      For "how do I..." questions, setup help, sharing your dashboard
+      YAML, or anything that isn't a confirmed bug or concrete feature
+      request, please use Discussions instead of opening an issue.
+  - name: Home Assistant community forum
+    url: https://community.home-assistant.io/
+    about: |
+      For broader HA questions (light platforms, Sonos, mobile
+      notifications) the HA community forum often gets you a faster
+      answer than this repo.

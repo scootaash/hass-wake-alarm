@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest something to add or change.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea for Wake Alarm? Great — describe the problem first
+        and the solution second; that helps keep the discussion focused
+        on what's actually missing.
+
+        For general "how do I..." questions, please use [Discussions](../discussions)
+        or the Home Assistant community forum thread instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem you're hitting?
+      description: |
+        What can't you do today, or what's awkward? Describe the situation
+        rather than jumping to the solution.
+      placeholder: |
+        e.g. "I want my alarm to skip bank holidays automatically, but the
+        only way today is to remember to disable it the night before."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        What would the integration / card do differently? Doesn't have to be
+        polished — rough sketch is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: |
+        Any other approaches, including doing nothing or solving it with
+        existing HA features?
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, mocks, links to related discussions, etc.
