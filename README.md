@@ -1,3 +1,5 @@
+<img src="icon.png" alt="Wake Alarm" width="128" align="right" />
+
 # hass-wake-alarm
 
 Sunrise wake-up alarms for Home Assistant. Lights ramp up before alarm
