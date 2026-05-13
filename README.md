@@ -50,6 +50,110 @@ Clicking the cog takes you to the setup page to adjust:
 3. Select a media source
 4. Shows targets set in setup wizard
 
+## How it works
+
+Every example below uses `my_alarm` as the slug — replace with whatever
+slug HA derived from your alarm's name.
+
+### Standard cycle
+
+1. **Schedule.** The integration computes the next fire time from
+   `time.my_alarm_alarm_time` and whichever day toggles are on, then
+   arms a single one-shot timer for `alarm_time − length_min`. No
+   minute-by-minute polling.
+2. **Ramp start** (`alarm_time − length_min`). State goes to `ramping`.
+   The configured lights turn on at 1% brightness / `start_kelvin` and
+   step linearly up to `max_brightness_pct` / `target_kelvin` over
+   `length_min × steps_per_min` steps (default 20 steps/min). The ramp
+   never dims a light below its current brightness — if you manually
+   brighten a bedroom light mid-ramp it stays brightened.
+3. **Music start** (`alarm_time`). State goes to `playing`. For a
+   single speaker the integration sets volume to 0, `play_media`'s the
+   selected favourite or playlist, then fades volume from 0 to the
+   configured target across `music_fade_sec`. For multiple Sonos
+   speakers the same sequence runs synchronously across the group,
+   with all the join / shuffle / settle-delay quirks Sonos requires.
+4. **Random track-skip.** After the queue starts, the music sequence
+   skips 1–4 tracks forward so each alarm and each snooze begins on a
+   different track from the favourite, not always track 1.
+5. **End.** Music plays until you dismiss, snooze, or the auto-dismiss
+   timer fires (if `auto_dismiss_min` is configured > 0). When state
+   returns to `idle` the integration recomputes the next fire
+   automatically — `sensor.my_alarm_next_alarm` jumps forward to the
+   following enabled day.
+
+If you (or another automation) change a configured light's brightness
+during the ramp using a different context, the ramp ends immediately —
+assumed to be an external override.
+
+### Presence
+
+Set the optional **Presence** entity in the integration's setup wizard
+(or via Configure later) to gate the whole cycle on someone being home.
+If their state isn't `home` at the moment the ramp would start, the
+alarm is silently skipped and the schedule rolls forward to the next
+enabled day. No notification, no light, no music. Useful for "alarm
+only if I'm in the house" — leave it blank to skip the check entirely.
+
+### Snooze and Dismiss
+
+Both actions are available on the card's main view, in the mobile
+notification action buttons, and via the `wake_alarm.snooze` /
+`wake_alarm.dismiss` services. They render on the main view only while
+`binary_sensor.my_alarm_active` is `on`.
+
+- **Snooze.** Pauses music on the active player or group, cancels the
+  ramp/music tasks, transitions to `snoozing`, and arms a timer for
+  `snooze_min` minutes. When it fires, the music sequence re-runs
+  (skipping the Sonos group-join preamble since the group is already
+  formed) and a different random track plays. Lights are left alone.
+  The mode tile shows a `Music in M:SS` countdown during the snooze.
+- **Dismiss.** Stops music on every configured player, unjoins any
+  group, cancels every pending timer (ramp, snooze, auto-dismiss,
+  scheduled music start), drops to `idle`, and reschedules the next
+  fire. Lights stay where they are — useful if they've ramped up and
+  you don't want them yanked back to off.
+
+`button.my_alarm_cancel_ramp` (also surfaced on the main view during
+ramping) stops the light ramp without dismissing the alarm — music
+will still play at `alarm_time`.
+
+### Notifications
+
+Mobile notifications are optional but designed so you can snooze or
+dismiss from the lock screen.
+
+**Standard notification** fires once at `alarm_time` when music starts,
+to `notify_target_standard`. Title is the instance name + "Alarm"; the
+body is short and includes two action buttons (Snooze, Dismiss) that
+call back into the `wake_alarm.*` services with the right entity
+encoded so multi-instance setups don't collide. On iOS this delivers
+with `interruption-level: active`; on Android it uses the
+`wake_alarm_standard` channel at default importance, so you can
+customise the channel's sound separately from your other HA
+notifications.
+
+**Urgent notification** is the fallback when `notify_target_urgent` is
+configured AND the music can't actually start at `alarm_time`. Two
+cases:
+
+- One of the configured media players is `unavailable` (powered off,
+  network issue): "Lights are on but {player} couldn't play. Wake up."
+- No media has been picked yet via the card: "Lights are on but no
+  media is configured. Open the alarm card to pick what to play."
+
+iOS gets `push.sound.critical: 1` plus `interruption-level: critical`,
+which bypasses Do Not Disturb and silent mode and rings at full volume
+even on a muted phone. Android uses the separate `wake_alarm_urgent`
+channel at HIGH importance so you can assign it a louder / more
+alarming sound than the standard channel. Both notifications carry the
+same Snooze + Dismiss action buttons.
+
+Two **Test** buttons in the card's settings (Test standard
+notification, Test urgent notification) fire each path on demand so
+you can verify the sound and interruption-level on your actual device
+before relying on it for a real alarm.
+
 ## Building your own dashboard
 
 Every example below assumes you named your alarm **My Alarm** at setup,

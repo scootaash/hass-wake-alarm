@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, setup help, or general discussion
+    url: https://community.home-assistant.io/
+    about: |
+      For "how do I…" questions, setup help, or sharing dashboards,
+      please use the Wake Alarm thread on the Home Assistant community
+      forum instead of opening an issue here. Issues are for confirmed
+      bugs and concrete feature requests.
