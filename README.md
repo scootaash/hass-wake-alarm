@@ -37,9 +37,11 @@ every related entity from the same config entry.
 
 ## Alarm Card options
 <img width="655" height="561" alt="image" src="https://github.com/user-attachments/assets/4f0224a6-de5a-4801-aee0-00f3b178eaa4" />
+
 The card shows a large off/on button, a time select with rocker switches to select the time and days of the week switches to control which days the alarm will sound. 
 
 <img width="485" height="1036" alt="image" src="https://github.com/user-attachments/assets/4d2977df-3574-45c2-b328-6b4b7845b8d3" />
+
 Clicking the cog takes you to the setup page to adjust:
 1. Settings for the alarm logic
 2. Run test patterns
