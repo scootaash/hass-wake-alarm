@@ -1,4 +1,4 @@
-<img src="icon.png" alt="Wake Alarm" width="128" align="right" />
+<img src="icon.png" alt="Wake Alarm" width="64" align="right" />
 
 # hass-wake-alarm
 
