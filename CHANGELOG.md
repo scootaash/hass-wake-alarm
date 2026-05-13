@@ -4,6 +4,43 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.4.0-beta.1 — 2026-05-13
+
+First beta cut for the Home Assistant community-forum launch. Mostly
+documentation + packaging since 0.3.0; the integration's runtime
+behaviour is unchanged.
+
+### Added
+
+- **Brand icons** for the integration tile. HA 2026.3+ serves them via
+  its built-in brands-proxy API
+  (`/api/brands/integration/wake_alarm/...`) from
+  `custom_components/wake_alarm/brand/`. No manifest changes, no code
+  changes — HA picks them up automatically on next restart once the
+  files are on disk.
+- **README "How it works" section** covering the standard cycle, the
+  presence guard, snooze + dismiss + cancel ramp, and both
+  notification paths (standard + urgent / critical).
+- **`info.md`** — short HACS-rendered intro so users get a meaningful
+  first impression in the HACS Information tab.
+- **Issue templates** as YAML forms with required fields and an
+  HA-install-type dropdown, reducing back-and-forth on bug triage.
+  Discussion and "how do I…" questions are routed to the HA community
+  forum.
+
+### Changed
+
+- **Icon storage** collapsed to a single canonical copy under
+  `custom_components/wake_alarm/brand/`. README and `info.md` image
+  embeds point at the deeper path.
+
+### Known limitations
+
+- HACS for custom integrations doesn't yet consume HA's new
+  brands-proxy API, so the integration card in HACS UI still shows the
+  generic puzzle-piece icon. The README + `info.md` image embeds are
+  the user-visible icon surface inside HACS until that lands upstream.
+
 ## 0.3.0 — 2026-05-11
 
 Audit-driven cleanup pass. All changes are backwards-compatible; bumped to
