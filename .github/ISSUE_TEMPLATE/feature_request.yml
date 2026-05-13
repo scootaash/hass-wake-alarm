@@ -1,0 +1,62 @@
+name: Feature request
+description: Suggest an idea for the integration or the card.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea? Great — describe the **problem** first and the
+        **solution** second so the discussion stays focused on what's
+        actually missing.
+
+        For "how do I…" questions please use the
+        [HA community forum](https://community.home-assistant.io/)
+        instead of opening an issue here.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem you're hitting?
+      description: |
+        Describe the situation rather than jumping to the solution.
+      placeholder: |
+        e.g. "I want my alarm to skip bank holidays automatically, but
+        the only way today is to remember to disable it the night before."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        What would the integration / card do differently? Rough sketch
+        is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: |
+        Other approaches, including HA features you've tried or doing
+        nothing.
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Roadmap check
+
+        The README's v2 backlog already lists ideas like the one-off
+        override, skip-next-occurrence, calendar-aware skip, Voice
+        Assist intents, TTS announcements, and weather-aware ramp
+        adjustments. If your idea is already there, please +1 the
+        corresponding existing issue or comment instead of opening
+        a new request.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, mocks, links to similar features in other integrations, etc.

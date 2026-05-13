@@ -1,0 +1,104 @@
+name: Bug report
+description: Something's broken or behaving unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in as much
+        as you can — every section helps narrow it down. For "how do I…"
+        questions please use the [HA community forum](https://community.home-assistant.io/)
+        instead.
+
+  - type: input
+    id: wake_alarm_version
+    attributes:
+      label: Wake Alarm version
+      description: Visible in HACS → Wake Alarm, or `custom_components/wake_alarm/manifest.json`.
+      placeholder: e.g. 0.3.0
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Core version
+      description: Settings → About.
+      placeholder: e.g. 2025.5.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ha_install
+    attributes:
+      label: How is Home Assistant installed?
+      options:
+        - Home Assistant OS
+        - Home Assistant Container
+        - Home Assistant Supervised
+        - Home Assistant Core (Python venv)
+    validations:
+      required: true
+
+  - type: input
+    id: lights
+    attributes:
+      label: Light integration(s) used with this alarm
+      description: Doesn't have to be exhaustive — just the platform names.
+      placeholder: e.g. Philips Hue, Zigbee2MQTT
+
+  - type: input
+    id: media_players
+    attributes:
+      label: Media player integration(s) used with this alarm
+      placeholder: e.g. Sonos
+
+  - type: input
+    id: phone
+    attributes:
+      label: Phone + Companion app version (if reporting a notification issue)
+      placeholder: e.g. iPhone 14 / iOS Companion 2025.5
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: A clear description of the actual behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps if you can. Even rough ones help.
+      placeholder: |
+        1. Set alarm time to 07:00 with a 5-min ramp and media picked
+        2. Wait until 06:55
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Home Assistant Core logs
+      description: |
+        Settings → System → Logs → "Home Assistant Core". Filter by
+        `wake_alarm` and paste anything that looks relevant.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: |
+        Screenshots, related automations, dashboard YAML, things you've
+        already tried — anything that might help.
