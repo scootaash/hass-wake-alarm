@@ -15,11 +15,15 @@ integrations — should work everywhere HA supports the underlying
 2. HACS → Wake Alarm → Download.
 3. Restart Home Assistant.
 4. Settings → Devices & Services → Add Integration → search "Wake Alarm".
+5. Set up the instance with the wizard to select which media player and lights are used. If desired add notification and presence
+6. Add the card and select a playlist. Adjust other settings if desired
 
 The card ships **inside the integration** and registers itself as a
 Lovelace resource at `/wake_alarm/wake-alarm-card.js`. There's no
 separate HACS Dashboard install or manual `Settings → Dashboards →
 Resources` step.
+
+
 
 ## Default card
 
@@ -30,6 +34,17 @@ entity: switch.my_alarm_enabled
 
 Pass any wake_alarm enabled-switch as `entity` and the card derives
 every related entity from the same config entry.
+
+## Alarm Card options
+<img width="655" height="561" alt="image" src="https://github.com/user-attachments/assets/4f0224a6-de5a-4801-aee0-00f3b178eaa4" />
+The card shows a large off/on button, a time select with rocker switches to select the time and days of the week switches to control which days the alarm will sound. 
+
+<img width="485" height="1036" alt="image" src="https://github.com/user-attachments/assets/4d2977df-3574-45c2-b328-6b4b7845b8d3" />
+Clicking the cog takes you to the setup page to adjust:
+1. Settings for the alarm logic
+2. Run test patterns
+3. Select a media source
+4. Shows targets set in setup wizard
 
 ## Building your own dashboard
 
