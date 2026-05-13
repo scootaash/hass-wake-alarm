@@ -1,7 +1,7 @@
 {
   "domain": "wake_alarm",
   "name": "Wake Alarm",
-  "version": "0.3.0",
+  "version": "0.4.0-beta.1",
   "config_flow": true,
   "iot_class": "local_push",
   "documentation": "https://github.com/scootaash/hass-wake-alarm",
