@@ -47,5 +47,7 @@ recipes.
 
 Philips Hue + Sonos + iOS Companion app. Other light / media-player
 integrations should work via the standard HA service interfaces but
-haven't been validated — feedback welcome on
-[Discussions](https://github.com/scootaash/hass-wake-alarm/discussions).
+haven't been validated — feedback welcome on the [Home Assistant
+community forum](https://community.home-assistant.io/). Bug reports
+and feature requests go on
+[GitHub Issues](https://github.com/scootaash/hass-wake-alarm/issues).
