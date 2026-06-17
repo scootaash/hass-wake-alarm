@@ -108,6 +108,13 @@ class WakeAlarmCoordinator:
 
         # Music-start callback scheduled from _async_on_fire
         self._cancel_music_start: CALLBACK_TYPE | None = None
+        # True from the moment a fire arms its music-start (scheduled or
+        # immediate) until that music-start callback runs or is cancelled.
+        # While set, a ramp that finishes early must NOT roll us back to IDLE
+        # and recompute the schedule — doing so would re-select the in-flight
+        # alarm (whose fire time is still a few seconds in the future) and
+        # restart the whole ramp. See _ramp_runner / _async_on_fire.
+        self._music_start_pending: bool = False
 
     # -------------------- public state --------------------
 
@@ -282,6 +289,11 @@ class WakeAlarmCoordinator:
         # Capture alarm_time (== self._next_fire). The schedule won't be
         # recomputed mid-cycle; it only recomputes after dismiss / completion.
         alarm_time = self._next_fire
+        # Arm the "music-start pending" guard BEFORE the ramp can run, so a
+        # ramp that finishes before alarm_time (timing jitter, or no lights
+        # configured) does not prematurely return to IDLE and re-fire this
+        # same alarm. Cleared by _async_on_music_start / _cancel_pending_music_start.
+        self._music_start_pending = alarm_time is not None
         await self._async_start_ramp(end_state=STATE_IDLE)
 
         if alarm_time is None:
@@ -300,6 +312,7 @@ class WakeAlarmCoordinator:
     async def _async_on_music_start(self, _now: datetime) -> None:
         """Fired at alarm_time. Decide between music, urgent, or no-media."""
         self._cancel_music_start = None
+        self._music_start_pending = False
 
         players = list(
             self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
@@ -317,7 +330,9 @@ class WakeAlarmCoordinator:
                 unavailable,
             )
             await async_send_player_unavailable(self, unavailable)
-            # Lights continue ramping; ramp_runner finally returns to IDLE.
+            # No music will play. If the ramp is still going it returns us to
+            # IDLE on completion; if it already finished, do it here.
+            self._ensure_idle_after_no_music()
             return
 
         if self.current_media() is None:
@@ -326,10 +341,26 @@ class WakeAlarmCoordinator:
                 self.slug,
             )
             await async_send_no_media(self)
+            self._ensure_idle_after_no_music()
             return
 
         await self._async_start_music(end_state=STATE_IDLE)
         await async_send_standard(self)
+
+    @callback
+    def _ensure_idle_after_no_music(self) -> None:
+        """Return to IDLE when no music will play and the ramp has finished.
+
+        With the music-start guard, a ramp that ends before alarm_time leaves
+        the coordinator in RAMPING (waiting for music). When music is then
+        skipped (players unavailable / no media), nothing else would roll us
+        back to IDLE, so handle it here. If the ramp is still running, its own
+        completion handles the transition (the guard is already cleared).
+        """
+        if self._state == STATE_RAMPING and (
+            self._ramp_task is None or self._ramp_task.done()
+        ):
+            self._set_state(STATE_IDLE)
 
     # -------------------- light ramp --------------------
 
@@ -373,8 +404,12 @@ class WakeAlarmCoordinator:
             self._ramp_task = None
             self._ramp_cancel_event = None
             # Only revert to IDLE here; later steps will decide whether to
-            # transition to PLAYING based on whether music is starting.
-            if self._state == STATE_RAMPING:
+            # transition to PLAYING based on whether music is starting. If a
+            # music-start is still pending for this fire, the sequence isn't
+            # over — leave the state alone so we don't recompute the schedule
+            # onto (and re-fire) this same alarm. _async_on_music_start drives
+            # the next transition once it runs.
+            if self._state == STATE_RAMPING and not self._music_start_pending:
                 self._set_state(end_state)
 
     # -------------------- music sequence --------------------
@@ -534,6 +569,7 @@ class WakeAlarmCoordinator:
 
     @callback
     def _cancel_pending_music_start(self) -> None:
+        self._music_start_pending = False
         if self._cancel_music_start is not None:
             self._cancel_music_start()
             self._cancel_music_start = None

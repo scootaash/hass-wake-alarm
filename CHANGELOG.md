@@ -4,6 +4,20 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Ramp restarting from zero at alarm time.** When the light ramp finished
+  a few seconds before the alarm/music time (timing jitter, or with no lights
+  configured), the coordinator briefly returned to IDLE and recomputed the
+  schedule. That recompute re-selected the still-future alarm for the same
+  day, whose ramp-start was already in the past, and the timer re-fired
+  immediately — restarting the whole ramp for another full cycle (e.g. a
+  06:00 / 30-min alarm ramped 05:30→05:59, then again 05:59→06:29). The ramp
+  now waits for the pending music-start instead of rescheduling onto the
+  in-flight alarm.
+
 ## 0.4.0-beta.1 — 2026-05-13
 
 First beta cut for the Home Assistant community-forum launch. Mostly

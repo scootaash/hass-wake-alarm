@@ -82,6 +82,34 @@ class TestComputeNextFire:
         assert (result - now).days >= 6
 
 
+class TestRescheduleTrap:
+    """Regression guard for the mid-cycle ramp-restart bug.
+
+    When a ramp finishes a few seconds *before* alarm_time, recomputing the
+    schedule at that instant re-selects today's alarm (still strictly in the
+    future), whose ramp_start (alarm_time - length) is already in the past.
+    async_track_point_in_time fires past targets immediately, so the alarm
+    would restart its ramp from zero. The coordinator now guards against this
+    by not recomputing while a music-start is pending; this test documents the
+    trap so the underlying compute_next_fire behaviour stays understood.
+    """
+
+    def test_recompute_just_before_alarm_picks_today_with_past_ramp_start(
+        self, pure: ModuleType
+    ) -> None:
+        length_min = 30
+        # Saturday 2026-05-09, 8 seconds before a 06:00 alarm.
+        now = datetime(2026, 5, 9, 5, 59, 52, tzinfo=timezone.utc)
+        next_fire = pure.compute_next_fire(now, dt_time(6, 0), {5})
+        assert next_fire is not None
+        # Today's alarm is still selected (strictly in the future)...
+        assert next_fire == datetime(2026, 5, 9, 6, 0, tzinfo=timezone.utc)
+        # ...and its ramp_start is in the past, which is exactly why an
+        # unguarded reschedule here re-fired the ramp immediately.
+        ramp_start = next_fire - timedelta(minutes=length_min)
+        assert ramp_start < now
+
+
 class TestActionId:
     def test_round_trip(self, pure: ModuleType) -> None:
         action_id = pure.build_action_id("snooze", "abc123")
