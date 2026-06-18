@@ -1,27 +1,24 @@
 """Full config-entry setup/teardown smoke test.
 
 Unlike the coordinator tests (which drive the state machine directly), this
-runs the real ``config_entries.async_setup`` path end-to-end. All the entity
-platforms set up fine; the step that breaks setup is ``_async_register_card``,
-which is exactly what #19 and #20 are about:
+runs the real ``config_entries.async_setup`` path end-to-end, including
+``_async_register_card``. That path used to be broken by #19 (duplicate static
+route on concurrent setup) and #20 (blocking ``open()`` of manifest.json); both
+are now fixed, so this is a real passing gate. The card registration calls
+``add_extra_js_url``, so it depends on the ``card_frontend`` fixture (which
+provides ``http`` + the frontend data store — see the integration conftest).
 
-  * #19 — the card's static path is registered unconditionally, so a second
-    entry (or a reload) raises ``RuntimeError`` registering a duplicate route;
-  * #20 — ``_read_integration_version()`` does a blocking ``open()`` of
-    manifest.json in the event loop.
-
-Card registration is also tightly coupled to the frontend (it calls
-``add_extra_js_url``), which isn't satisfiable in the PHACC test environment.
-Hardening that path — guarding the static-path registration, reading the
-manifest off-loop, and tolerating an unavailable frontend — is what #19/#20
-should deliver, after which this becomes a real passing gate. So it's marked
-``xfail`` (non-strict): remove the marker once that lands and it flips green.
+This drives the real config-entry setup, which imports ``config_flow``; that
+module uses ``ConfigFlowResult`` (HA 2024.4+), so the test is skipped on older
+cores where the integration's config flow can't be imported at all. The #19/#20
+regressions themselves are gated by ``test_card_registration.py``, which runs on
+every supported core.
 """
 from __future__ import annotations
 
+import homeassistant.config_entries as _config_entries
 import pytest
 from homeassistant.const import CONF_NAME
-from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.wake_alarm.const import (
@@ -33,19 +30,17 @@ from custom_components.wake_alarm.const import (
     DOMAIN,
 )
 
+_HAS_CONFIG_FLOW_RESULT = hasattr(_config_entries, "ConfigFlowResult")
 
-@pytest.mark.xfail(
-    reason="card registration (_async_register_card) breaks full setup: "
-    "#19 duplicate static route, #20 blocking manifest open(), and "
-    "frontend coupling not satisfiable under PHACC",
-    strict=True,
+
+@pytest.mark.skipif(
+    not _HAS_CONFIG_FLOW_RESULT,
+    reason="integration config_flow requires ConfigFlowResult (HA 2024.4+)",
 )
-async def test_full_entry_setup_and_unload(hass) -> None:
+async def test_full_entry_setup_and_unload(hass, card_frontend) -> None:
     """The entry sets up its platforms and unloads cleanly."""
-    # The integration registers its Lovelace card as a static path via
-    # hass.http, so the http stack must be up for a realistic run.
-    assert await async_setup_component(hass, "http", {})
-
+    # card_frontend provides http + the add_extra_js_url data store the card
+    # registration needs (the real frontend component can't run under PHACC).
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=2,

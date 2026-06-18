@@ -6,9 +6,9 @@ the full scheduling state machine with controllable time
 (``freezer`` + ``async_fire_time_changed``) and mocked side-effects.
 
 Driving the coordinator directly — rather than ``config_entries.async_setup`` —
-keeps the suite focused on the state machine and sidesteps the entry-setup bugs
-tracked in #19 (duplicate static route) and #20 (blocking ``open()``); a single
-``xfail``-marked smoke test in ``test_setup.py`` covers that path.
+keeps the suite focused on the state machine; the full entry-setup path (and the
+card registration that #19/#20 were about) is covered by ``test_setup.py`` and
+``test_card_registration.py`` via the ``card_frontend`` fixture below.
 """
 from __future__ import annotations
 
@@ -203,6 +203,31 @@ class Env:
         for coord in self._coordinators:
             await coord.async_unload()
         await self.hass.async_block_till_done()
+
+
+@pytest.fixture
+async def card_frontend(hass):
+    """Minimal frontend stack for exercising ``_async_register_card``.
+
+    PHACC can't set up the real ``frontend`` component (the compiled
+    ``hass_frontend`` package isn't installed), so we bring up ``http`` — needed
+    for static-path registration — and initialise the ``add_extra_js_url`` data
+    store exactly as ``frontend.async_setup`` does. Returns the ``UrlManager``
+    whose ``.urls`` the card URL is added to.
+    """
+    from homeassistant.components.frontend import (
+        DATA_EXTRA_MODULE_URL,
+        UrlManager,
+    )
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "http", {})
+    try:
+        manager = UrlManager(lambda *args: None, [])  # HA 2024.6+
+    except TypeError:
+        manager = UrlManager([])  # HA < 2024.6 (no on_change arg)
+    hass.data[DATA_EXTRA_MODULE_URL] = manager
+    return manager
 
 
 @pytest.fixture
