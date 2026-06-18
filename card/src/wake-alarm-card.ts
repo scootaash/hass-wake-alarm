@@ -33,6 +33,14 @@ export class WakeAlarmCard extends LitElement {
   @state() private _related?: RelatedEntities;
   @state() private _resolveError?: string;
 
+  // Bounded retry: a card can render before the integration has finished
+  // registering its entities, in which case the first resolve throws. Retry on
+  // later hass/config updates so it self-heals, but cap it so a genuinely
+  // misconfigured entity can't spin the WS call forever.
+  private static readonly _MAX_RESOLVE_ATTEMPTS = 10;
+  private _resolving = false;
+  private _resolveAttempts = 0;
+
   public setConfig(config: WakeAlarmCardConfig): void {
     // Allow incomplete config (e.g. the stub HA hands us when the user
     // first picks the card from the "Add Card" list). The editor pushes
@@ -50,6 +58,8 @@ export class WakeAlarmCard extends LitElement {
       config ?? ({ type: "custom:wake-alarm-card", entity: "" } as WakeAlarmCardConfig);
     this._related = undefined;
     this._resolveError = undefined;
+    this._resolving = false;
+    this._resolveAttempts = 0;
   }
 
   public getCardSize(): number {
@@ -89,12 +99,18 @@ export class WakeAlarmCard extends LitElement {
     }
   }
 
-  protected willUpdate(_changed: PropertyValues): void {
+  protected willUpdate(changed: PropertyValues): void {
+    // Resolve once the registry is reachable. Retry only on real hass/config
+    // updates (not on our own _resolveError state change) so the attempts
+    // spread out as the integration finishes loading, rather than bursting
+    // through the cap instantly.
     if (
       this.hass &&
       this._config?.entity &&
       !this._related &&
-      !this._resolveError
+      !this._resolving &&
+      this._resolveAttempts < WakeAlarmCard._MAX_RESOLVE_ATTEMPTS &&
+      (changed.has("hass") || changed.has("_config"))
     ) {
       void this._resolveRelated();
     }
@@ -102,17 +118,22 @@ export class WakeAlarmCard extends LitElement {
 
   private async _resolveRelated(): Promise<void> {
     if (!this.hass || !this._config) return;
+    this._resolving = true;
+    this._resolveAttempts += 1;
     try {
       const entries = await this.hass.callWS<EntityRegistryEntry[]>({
         type: "config/entity_registry/list",
       });
       this._related = buildRelated(this._config.entity, entries);
+      this._resolveError = undefined;
     } catch (e) {
       if (e instanceof CardConfigError) {
         this._resolveError = e.message;
       } else {
         this._resolveError = `Could not resolve wake_alarm entities: ${e}`;
       }
+    } finally {
+      this._resolving = false;
     }
   }
 

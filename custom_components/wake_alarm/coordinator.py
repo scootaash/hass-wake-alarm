@@ -130,6 +130,19 @@ class WakeAlarmCoordinator:
         # IDLE settle, so it can never arm a second fire for the same day (#44).
         self._recompute_pending: bool = False
 
+        # Set once async_unload starts. A cancelled ramp/music task runs its
+        # finally on the way out, which can otherwise re-arm the schedule timers
+        # (via the deferred recompute) and fire the after-script after teardown
+        # has finished cleaning up. Guards in async_recompute_schedule and
+        # _run_script make those finallys inert once unloading.
+        self._unloading: bool = False
+
+        # Whether music was actually PLAYING when the current snooze began. Only
+        # then is the (Sonos) group already formed, so only then may the
+        # snooze-resume skip the group-join preamble (from_snooze). Snoozing
+        # during the ramp has no group yet and needs a full music start.
+        self._snooze_from_playing: bool = False
+
     # -------------------- public state --------------------
 
     @property
@@ -213,6 +226,10 @@ class WakeAlarmCoordinator:
         self.async_recompute_schedule(catch_up=True)
 
     async def async_unload(self) -> None:
+        # Mark teardown first so any ramp/music task finally that runs while we
+        # cancel below cannot re-arm timers or fire scripts (see the guards in
+        # async_recompute_schedule / _run_script).
+        self._unloading = True
         for cancel in self._cancel_listeners:
             cancel()
         self._cancel_listeners.clear()
@@ -279,6 +296,11 @@ class WakeAlarmCoordinator:
         skip_today exclude today's occurrence entirely — used by dismiss, which
                    means "not this one", even when today's alarm is still ahead.
         """
+        if self._unloading:
+            # Teardown in progress: never arm new timers. A cancelled ramp/music
+            # task's finally can reach here via the deferred recompute in
+            # _set_state; without this guard those timers would outlive unload.
+            return
         # Any explicit recompute consumes a pending deferred one (#44).
         self._recompute_pending = False
         self._cancel_scheduled_timers()
@@ -666,6 +688,12 @@ class WakeAlarmCoordinator:
             )
             return
 
+        # Capture whether music is already playing (group formed) before we
+        # transition out of PLAYING below. Drives whether the resume may skip
+        # the Sonos group-join preamble; snoozing mid-ramp must not, since the
+        # group isn't formed yet.
+        self._snooze_from_playing = self._state == STATE_PLAYING
+
         # End ramp if it's running (ramp_runner finally will not flip state
         # back to IDLE because we set SNOOZING below before it runs).
         if self._ramp_cancel_event is not None:
@@ -707,9 +735,13 @@ class WakeAlarmCoordinator:
         self._snooze_finishes_at = None
         if self._state != STATE_SNOOZING:
             return
-        # Re-run music skipping the group join (group is already formed).
+        # Re-run music. Skip the Sonos group-join preamble only if the group
+        # was already formed during a prior PLAYING phase; snoozing mid-ramp
+        # has no group yet, so it needs the full start.
         await self._async_start_music(
-            end_state=STATE_IDLE, from_snooze=True, is_alarm=True
+            end_state=STATE_IDLE,
+            from_snooze=self._snooze_from_playing,
+            is_alarm=True,
         )
         if self._state == STATE_SNOOZING:
             # Nothing resumed — lights-only alarm (#22) or the media selection
@@ -993,6 +1025,10 @@ class WakeAlarmCoordinator:
         cancelled on unload). The instance slug + name are passed as script
         variables for context.
         """
+        if self._unloading:
+            # A cancelled music task's finally can reach _finish_cycle during
+            # teardown; the after-script must not fire on unload/reload.
+            return
         target = self.entry.data.get(conf_key)
         if not target:
             return
