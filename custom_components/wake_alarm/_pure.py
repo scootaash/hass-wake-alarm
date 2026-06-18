@@ -51,6 +51,13 @@ def compute_next_fire(
     return the first candidate that is both on an enabled day AND strictly
     in the future. Day boundaries roll over correctly because we anchor on
     `now`'s timezone-aware date and walk forward in 1-day steps.
+
+    DST: candidates stay timezone-aware and zoneinfo recomputes the UTC
+    offset from the wall-clock fields, so an ordinary alarm on the far side
+    of a transition still fires at the intended wall-clock time (#36). Alarm
+    times that land in a spring-forward gap or a fall-back overlap resolve via
+    Python's default fold=0 semantics to a single deterministic instant (the
+    earliest valid one); test_schedule pins this behaviour.
     """
     if not enabled_days:
         return None

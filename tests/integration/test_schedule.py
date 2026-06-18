@@ -72,6 +72,51 @@ class TestComputeNextFire:
         assert result.hour == 7
         assert result.weekday() == 6
 
+    def test_dst_normal_alarm_across_transition_keeps_wall_time(
+        self, pure: ModuleType
+    ) -> None:
+        # #36: the everyday-important property. A 07:00 alarm on the Sunday
+        # *after* spring-forward (BST) still fires at 07:00 wall-clock when
+        # computed from a Friday that's still GMT. zoneinfo recomputes the
+        # offset from the fields, so the resulting instant is 06:00 UTC.
+        london = ZoneInfo("Europe/London")
+        now = datetime(2026, 3, 27, 9, 0, tzinfo=london)  # Fri (GMT)
+        result = pure.compute_next_fire(now, dt_time(7, 0), {6})  # Sunday (BST)
+        assert result is not None
+        assert result.hour == 7
+        assert result.astimezone(timezone.utc) == datetime(
+            2026, 3, 29, 6, 0, tzinfo=timezone.utc
+        )
+
+    def test_dst_spring_forward_gap_alarm_is_deterministic(
+        self, pure: ModuleType
+    ) -> None:
+        # #36: an alarm at 01:30 on the spring-forward day is a non-existent
+        # local time (clocks jump 01:00 GMT → 02:00 BST). fold=0 resolves it to
+        # a single, deterministic instant (01:30 GMT == 01:30 UTC) rather than
+        # erroring or firing twice.
+        london = ZoneInfo("Europe/London")
+        now = datetime(2026, 3, 29, 0, 0, tzinfo=london)
+        result = pure.compute_next_fire(now, dt_time(1, 30), {6})  # Sunday
+        assert result is not None
+        assert result.astimezone(timezone.utc) == datetime(
+            2026, 3, 29, 1, 30, tzinfo=timezone.utc
+        )
+
+    def test_dst_fall_back_ambiguous_alarm_picks_earliest(
+        self, pure: ModuleType
+    ) -> None:
+        # #36: an alarm at 01:30 on the fall-back day is ambiguous (01:30 BST
+        # and 01:30 GMT both occur). fold=0 fires once, at the earliest (BST)
+        # instance == 00:30 UTC.
+        london = ZoneInfo("Europe/London")
+        now = datetime(2026, 10, 25, 0, 0, tzinfo=london)
+        result = pure.compute_next_fire(now, dt_time(1, 30), {6})  # Sunday
+        assert result is not None
+        assert result.astimezone(timezone.utc) == datetime(
+            2026, 10, 25, 0, 30, tzinfo=timezone.utc
+        )
+
     def test_returns_none_when_only_today_after_alarm_disabled(
         self, pure: ModuleType
     ) -> None:

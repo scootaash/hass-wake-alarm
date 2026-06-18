@@ -423,6 +423,32 @@ async def test_auto_dismiss_deadline_not_extended_by_snooze(
     assert coord._auto_dismiss_deadline == at(7, 30)
 
 
+async def test_auto_dismiss_fires_during_snooze(env, freezer) -> None:
+    """#38: a snooze in progress must not let the alarm outlive auto-dismiss."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(
+        env.make_entry(), days=SAT, snooze_min=10, auto_dismiss_min=2
+    )
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert coord.state == STATE_PLAYING
+    assert coord._auto_dismiss_deadline == at(7, 2)
+
+    # Snooze for 10 min at 07:00 — without the fix this would resume music at
+    # 07:10, well past the 07:02 auto-dismiss deadline.
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # The deadline lands mid-snooze: auto-dismiss fires and stops everything.
+    await fire(env.hass, freezer, at(7, 2))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    assert env.music.calls == 1  # snooze never resumed
+    assert coord.next_fire == NEXT_WEEK
+
+
 async def test_dismiss_during_ramp_skips_today(env, freezer) -> None:
     """Dismiss before alarm_time rolls past today; the alarm never fires."""
     freezer.move_to(at(5, 0))
@@ -571,6 +597,52 @@ async def test_scripts_run_for_lights_only_alarm(env, freezer) -> None:
     assert len(after) == 1
 
 
+async def test_master_disable_in_idle_gap_does_not_strand_cycle(
+    env, freezer
+) -> None:
+    """#34 regression: disabling the master switch during the ramp→alarm gap
+    must not strand _cycle_active, or the next occurrence's before-script is
+    skipped.
+    """
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before", after_script="script.after"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    # Ramp fires at 06:45 and completes; cycle is now open across the idle gap.
+    await fire(env.hass, freezer, at(6, 45))
+    assert len(before) == 1
+    assert coord.state == STATE_IDLE
+    assert coord._cycle_active is True
+
+    # User disables the master switch during the gap (before alarm_time).
+    env.hass.states.async_set("switch.test_enabled", "off")
+    await env.hass.async_block_till_done()
+    # The cycle is closed out without firing the after-script (the alarm never
+    # fired), and the alarm timer is cancelled.
+    assert coord._cycle_active is False
+    assert len(after) == 0
+    assert coord.next_fire is None
+
+    # Nothing fires at the old alarm time.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+
+    # Re-enable for the next occurrence; its before-script must fire again.
+    env.hass.states.async_set("switch.test_enabled", "on")
+    await env.hass.async_block_till_done()
+    assert coord.next_fire == NEXT_WEEK
+
+    nxt_ramp = at(6, 45) + timedelta(days=7)
+    await fire(env.hass, freezer, nxt_ramp)
+    await env.hass.async_block_till_done()
+    assert len(before) == 2  # not stranded — before fires for the new occurrence
+
+
 async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
     """Home at ramp (before runs); away by alarm → after skipped, cycle reset."""
     freezer.move_to(at(5, 0))
@@ -594,6 +666,35 @@ async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
     assert env.music.calls == 0
     assert len(after) == 0  # alarm gated → after not appropriate
     assert coord._cycle_active is False  # but the cycle is reset for next time
+
+
+# --------------------------------------------------------------------------
+# teardown / unload (#35)
+# --------------------------------------------------------------------------
+
+
+async def test_double_unload_is_idempotent(env, freezer) -> None:
+    """async_unload must be safe to call twice (and clear tracked tasks)."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+    await coord.async_unload()
+    await coord.async_unload()  # must not raise
+    assert coord._background_tasks == set()
+
+
+async def test_unload_mid_ramp_cancels_ramp_task(env, freezer) -> None:
+    """Unloading while the ramp is running cancels the task, leaving nothing."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+
+    env.ramp.block()
+    await fire_until_started(env.hass, freezer, at(6, 45), env.ramp)
+    assert coord.state == STATE_RAMPING
+
+    await coord.async_unload()
+    await env.hass.async_block_till_done()
+    assert coord._ramp_task is None
+    assert coord._background_tasks == set()
 
 
 # --------------------------------------------------------------------------
