@@ -1,7 +1,22 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "strict"
+# auto: HA-backed async tests don't each need an explicit asyncio marker, and
+# the existing pure tests are synchronous so they're unaffected.
+asyncio_mode = "auto"
+# Intentionally NOT treating all warnings as errors: across the HA version
+# matrix each release emits a different set of deprecation warnings, which
+# would make "error" an unmaintainable, version-coupled gate. We still surface
+# warnings in the report, just don't fail on them.
 filterwarnings = [
-  "error",
+  "default",
   "ignore::DeprecationWarning",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# Conservative, high-signal rule set: pycodestyle errors/warnings, pyflakes,
+# and import sorting. Kept deliberately small so the hard gate stays bounded.
+select = ["E", "F", "W", "I"]

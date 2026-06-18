@@ -1,0 +1,11 @@
+# Test dependencies for the latest-HA leg (used for local development).
+#
+# pytest-homeassistant-custom-component pulls a matching `homeassistant` and
+# `freezegun` transitively. CI pins a specific PHACC version per matrix leg
+# (see .github/workflows/ci.yml); this file tracks the latest supported set so
+# `pip install -r requirements_test.txt` gives a working local environment on
+# Python 3.13.
+pytest
+pytest-asyncio
+pytest-homeassistant-custom-component==0.13.316
+ruff
