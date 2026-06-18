@@ -38,10 +38,17 @@ jobs:
           - label: latest
             python-version: "3.13"
             phacc: "0.13.316"
-          # Minimum supported HA (matches the hacs.json floor, 2024.1.x).
+            extra_pins: ""
+          # Minimum supported HA (matches the hacs.json floor, 2024.6.x).
+          # config_flow.py uses ConfigFlowResult (HA 2024.4+); 2024.6 is the
+          # oldest PHACC that installs cleanly (2024.4/2024.5 builds pin a
+          # since-removed mypy-dev alpha), so it's our tested floor.
+          # josepy<2 keeps acme importable (josepy 2.x dropped ComparableX509,
+          # which this HA's acme dependency still uses).
           - label: min
             python-version: "3.12"
-            phacc: "0.13.90"
+            phacc: "0.13.132"
+            extra_pins: '"josepy<2"'
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +59,7 @@ jobs:
 
       - name: Install test deps
         # PHACC pulls a matching homeassistant + freezegun transitively.
-        run: pip install pytest pytest-asyncio "pytest-homeassistant-custom-component==${{ matrix.phacc }}"
+        run: pip install pytest pytest-asyncio "pytest-homeassistant-custom-component==${{ matrix.phacc }}" ${{ matrix.extra_pins }}
 
       - name: Run tests
         run: pytest tests/ -v
