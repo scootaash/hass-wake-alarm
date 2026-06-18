@@ -399,6 +399,30 @@ async def test_snooze_pauses_then_resumes(env, freezer) -> None:
     assert env.music.kwargs_log[-1].get("from_snooze") is True
 
 
+async def test_snooze_during_ramp_resumes_with_full_music_start(
+    env, freezer
+) -> None:
+    """Snoozing during the ramp (music never played) resumes with
+    from_snooze=False, so the Sonos group-join preamble still runs."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT, snooze_min=4)
+
+    env.ramp.block()
+    await fire_until_started(env.hass, freezer, at(6, 45), env.ramp)
+    assert coord.state == STATE_RAMPING
+
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # Snooze fires at 06:49 → music starts fresh (no group formed during ramp).
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(6, 49), env.music)
+    assert coord.state == STATE_PLAYING
+    assert env.music.calls == 1
+    assert env.music.kwargs_log[-1].get("from_snooze") is False
+
+
 async def test_auto_dismiss_deadline_not_extended_by_snooze(
     env, freezer
 ) -> None:
@@ -694,6 +718,47 @@ async def test_unload_mid_ramp_cancels_ramp_task(env, freezer) -> None:
     await coord.async_unload()
     await env.hass.async_block_till_done()
     assert coord._ramp_task is None
+    assert coord._background_tasks == set()
+
+
+async def test_unload_mid_music_no_timer_leak_no_after_script(
+    env, freezer
+) -> None:
+    """Unloading while PLAYING must not let the cancelled music task's finally
+    re-arm the schedule or fire the after-script.
+
+    The teardown race: the music runner's finally runs on cancellation while
+    still in PLAYING, which (with a deferred recompute pending) re-armed the
+    ramp/alarm point-in-time timers AFTER async_unload had cancelled them, and
+    fired the after-script on the way out.
+    """
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before", after_script="script.after"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert coord.state == STATE_PLAYING
+    assert len(before) == 1
+
+    # A watched dependency changes during playback → deferred recompute, which
+    # the music finally would otherwise apply (and re-arm timers) on unload.
+    env.hass.states.async_set("time.test_alarm_time", "07:30:00")
+    await asyncio.sleep(0)
+    assert coord._recompute_pending is True
+
+    await coord.async_unload()
+    await env.hass.async_block_till_done()
+
+    # No after-script on teardown, no lingering tasks, and both schedule timers
+    # cancelled (not re-armed by the finally).
+    assert len(after) == 0
+    assert coord._cancel_alarm_schedule is None
+    assert coord._cancel_ramp_schedule is None
     assert coord._background_tasks == set()
 
 
