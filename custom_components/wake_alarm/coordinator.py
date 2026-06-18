@@ -384,6 +384,17 @@ class WakeAlarmCoordinator:
         players = list(
             self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
         )
+        if not players:
+            # Lights-only alarm (#22): no media player configured. Still send
+            # the friendly standard notification so the user gets a morning
+            # ping and a Dismiss handle, but skip the urgent "players
+            # unavailable" / "no media" notices — those only make sense once
+            # the user has opted into music. Snooze/auto-dismiss are music
+            # concepts and are not armed here; the ramp settles to idle.
+            await async_send_standard(self)
+            self._settle_idle_if_not_active()
+            return
+
         unavailable = [
             ent_id
             for ent_id in players
@@ -497,6 +508,13 @@ class WakeAlarmCoordinator:
                 "music already running for %s; skipping start", self.slug
             )
             return
+        # Precondition: no media player configured (lights-only alarm, #22) →
+        # there is nothing to play on, so skip music entirely.
+        if not (self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []):
+            _LOGGER.debug(
+                "music skipped for %s: no media players configured", self.slug
+            )
+            return
         # Precondition: no media picked → skip music entirely. The on-fire
         # path handles the urgent notification on its own; here (test button
         # or snooze-resume) we just log and bail.
@@ -588,6 +606,10 @@ class WakeAlarmCoordinator:
             return
         # Re-run music skipping the group join (group is already formed).
         await self._async_start_music(end_state=STATE_IDLE, from_snooze=True)
+        if self._state == STATE_SNOOZING:
+            # Nothing resumed — lights-only alarm (#22) or the media selection
+            # was cleared during the snooze. Don't hang in SNOOZING; settle.
+            self._set_state(STATE_IDLE)
 
     async def async_dismiss(self) -> None:
         """Full dismiss per the brief.

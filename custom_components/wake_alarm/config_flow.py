@@ -107,7 +107,7 @@ def _build_schema(
         ] = str
 
     fields[
-        vol.Required(
+        vol.Optional(
             CONF_LIGHT_ENTITIES,
             default=defaults.get(CONF_LIGHT_ENTITIES, []),
         )
@@ -116,7 +116,7 @@ def _build_schema(
     )
 
     fields[
-        vol.Required(
+        vol.Optional(
             CONF_MEDIA_PLAYER_ENTITIES,
             default=defaults.get(CONF_MEDIA_PLAYER_ENTITIES, []),
         )
@@ -183,22 +183,23 @@ def _validate_input(
             data[CONF_NAME] = name
             data[CONF_SLUG] = slug
 
-    lights = user_input.get(CONF_LIGHT_ENTITIES) or []
-    if not lights:
-        errors[CONF_LIGHT_ENTITIES] = "required"
-    else:
-        data[CONF_LIGHT_ENTITIES] = list(lights)
+    # Lights and media players are both individually optional, but an alarm
+    # that does nothing makes no sense, so require at least one of the two
+    # (#22 — lights-only or music-only are both valid).
+    lights = list(user_input.get(CONF_LIGHT_ENTITIES) or [])
+    players = list(user_input.get(CONF_MEDIA_PLAYER_ENTITIES) or [])
 
-    players = user_input.get(CONF_MEDIA_PLAYER_ENTITIES) or []
-    if not players:
-        errors[CONF_MEDIA_PLAYER_ENTITIES] = "required"
+    if not lights and not players:
+        errors[CONF_LIGHT_ENTITIES] = "need_light_or_media"
+        errors[CONF_MEDIA_PLAYER_ENTITIES] = "need_light_or_media"
     else:
-        player_errors, ph = _validate_players(hass, players)
-        if player_errors:
-            errors.update(player_errors)
-            placeholders.update(ph)
-        else:
-            data[CONF_MEDIA_PLAYER_ENTITIES] = list(players)
+        data[CONF_LIGHT_ENTITIES] = lights
+        data[CONF_MEDIA_PLAYER_ENTITIES] = players
+        if players:
+            player_errors, ph = _validate_players(hass, players)
+            if player_errors:
+                errors.update(player_errors)
+                placeholders.update(ph)
 
     person = user_input.get(CONF_PERSON_ENTITY)
     if person:

@@ -169,6 +169,54 @@ async def test_zero_length_ramp_and_alarm_coincide(env, freezer) -> None:
 
 
 # --------------------------------------------------------------------------
+# lights-only alarm (no media player configured) — #22
+# --------------------------------------------------------------------------
+
+
+async def test_lights_only_alarm_runs_ramp_no_music(env, freezer) -> None:
+    """No media player → ramp runs, no music, friendly standard notice only."""
+    freezer.move_to(at(5, 0))
+    entry = env.make_entry(media_player_entities=[])
+    coord = await env.build(entry, days=SAT)
+
+    # The ramp still runs on its own timer.
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    # At alarm time: no music, the standard notification fires, and neither
+    # urgent notice (players-unavailable / no-media) is sent.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert env.send_standard.await_count == 1
+    assert env.send_player_unavailable.await_count == 0
+    assert env.send_no_media.await_count == 0
+    assert coord.state == STATE_IDLE
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_lights_only_snooze_during_ramp_settles_idle(env, freezer) -> None:
+    """Snoozing a lights-only ramp has nothing to resume → settles to idle."""
+    freezer.move_to(at(5, 0))
+    entry = env.make_entry(media_player_entities=[])
+    coord = await env.build(entry, days=SAT, snooze_min=4)
+
+    env.ramp.block()
+    await fire_until_started(env.hass, freezer, at(6, 45), env.ramp)
+    assert coord.state == STATE_RAMPING
+
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # Snooze fires: no media players, so nothing resumes — must not hang.
+    await fire(env.hass, freezer, at(6, 49))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.state == STATE_IDLE
+
+
+# --------------------------------------------------------------------------
 # presence (checked independently at ramp_start and alarm_time)
 # --------------------------------------------------------------------------
 
