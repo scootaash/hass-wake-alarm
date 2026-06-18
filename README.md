@@ -59,8 +59,10 @@ slug HA derived from your alarm's name.
 
 1. **Schedule.** The integration computes the next fire time from
    `time.my_alarm_alarm_time` and whichever day toggles are on, then
-   arms a single one-shot timer for `alarm_time − length_min`. No
-   minute-by-minute polling.
+   arms **two independent one-shot timers**: one for the light ramp at
+   `alarm_time − length_min`, and one for the music at `alarm_time`. No
+   minute-by-minute polling. Crucially, the music timer stands on its
+   own — if anything goes wrong with the lights, the alarm still sounds.
 2. **Ramp start** (`alarm_time − length_min`). State goes to `ramping`.
    The configured lights turn on at 1% brightness / `start_kelvin` and
    step linearly up to `max_brightness_pct` / `target_kelvin` over
@@ -77,10 +79,14 @@ slug HA derived from your alarm's name.
    skips 1–4 tracks forward so each alarm and each snooze begins on a
    different track from the favourite, not always track 1.
 5. **End.** Music plays until you dismiss, snooze, or the auto-dismiss
-   timer fires (if `auto_dismiss_min` is configured > 0). When state
-   returns to `idle` the integration recomputes the next fire
-   automatically — `sensor.my_alarm_next_alarm` jumps forward to the
-   following enabled day.
+   timer fires (if `auto_dismiss_min` is configured > 0). The schedule
+   rolls forward to the following enabled day the moment the alarm
+   fires, so `sensor.my_alarm_next_alarm` always points at the next one.
+
+**Restart catch-up.** If Home Assistant is down at `alarm_time` but
+comes back within 15 minutes, the alarm fires immediately on startup so
+you're still woken (music only — the light ramp isn't replayed). Beyond
+that window the schedule just rolls forward.
 
 If you (or another automation) change a configured light's brightness
 during the ramp using a different context, the ramp ends immediately —
@@ -89,11 +95,13 @@ assumed to be an external override.
 ### Presence
 
 Set the optional **Presence** entity in the integration's setup wizard
-(or via Configure later) to gate the whole cycle on someone being home.
-If their state isn't `home` at the moment the ramp would start, the
-alarm is silently skipped and the schedule rolls forward to the next
-enabled day. No notification, no light, no music. Useful for "alarm
-only if I'm in the house" — leave it blank to skip the check entirely.
+(or via Configure later) to gate the cycle on someone being home.
+Presence is checked twice, independently: at ramp start for the lights,
+and again at `alarm_time` for the music. So if you're out when the ramp
+would begin but back home by the alarm time, the music still wakes you
+— and if you leave in between, the lights may ramp but no music plays.
+No notification is sent when a phase is skipped. Useful for "alarm only
+if I'm in the house" — leave it blank to skip the check entirely.
 
 ### Snooze and Dismiss
 

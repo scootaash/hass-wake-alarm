@@ -70,6 +70,11 @@ DEFAULT_STEPS_PER_MIN = 20
 DEFAULT_MUSIC_FADE_SEC = 60
 DEFAULT_AUTO_DISMISS_MIN = 0
 
+# Restart catch-up window. If Home Assistant is down at alarm_time and boots
+# back up within this many minutes, the alarm fires immediately so the user is
+# still woken; beyond it, the schedule simply rolls forward to the next day.
+CATCHUP_GRACE_MIN = 15
+
 # Attribute keys on sensor.<slug>_media_selection
 ATTR_MEDIA_CONTENT_ID = "media_content_id"
 ATTR_MEDIA_CONTENT_TYPE = "media_content_type"

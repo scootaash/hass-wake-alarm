@@ -4,6 +4,43 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **Music is now scheduled independently of the light ramp.** The coordinator
+  arms two separate timers — a light-ramp timer at `alarm_time − length` and an
+  authoritative alarm/music timer at `alarm_time` — instead of arming music
+  from inside the ramp callback. A failure anywhere in the light phase (the
+  callback never running, an exception, no lights configured, presence failing
+  at ramp-start, or a restart inside the ramp window) can no longer prevent the
+  alarm from sounding. The music — the safety-critical feature — always fires
+  on its own timer.
+- **Presence is re-checked at alarm time.** Presence now gates the two phases
+  independently: at ramp-start for the lights, and again (freshly) at
+  `alarm_time` for the music. Someone out when the ramp would start but home by
+  the alarm time is still woken; someone who leaves in between gets the lights
+  but no music.
+
+### Added
+
+- **Restart catch-up.** If Home Assistant is down across `alarm_time` but boots
+  back within `CATCHUP_GRACE_MIN` minutes (default 15), the alarm fires
+  immediately on startup so the user is still woken (music only; the light ramp
+  is not replayed). Beyond the window the schedule simply rolls forward.
+
+### Fixed
+
+- **Ramp restarting from zero at alarm time.** When the light ramp finished a
+  few seconds before the alarm/music time, the coordinator returned to IDLE and
+  recomputed the schedule, re-selecting the still-future alarm for the same day
+  (whose ramp-start was already in the past) and re-firing immediately — e.g. a
+  06:00 / 30-min alarm ramped 05:30→05:59, then again 05:59→06:29. Fixed
+  structurally: the schedule now rolls forward only when the alarm timer fires
+  (`now >= alarm_time`, so the next-occurrence computation can never re-select
+  today), and the IDLE transition no longer recomputes. The previous
+  `_music_start_pending` workaround has been removed.
+
 ## 0.4.0-beta.1 — 2026-05-13
 
 First beta cut for the Home Assistant community-forum launch. Mostly

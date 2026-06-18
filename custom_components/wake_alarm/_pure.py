@@ -8,6 +8,7 @@ way around.
 from __future__ import annotations
 
 from datetime import datetime, time as dt_time, timedelta
+from typing import NamedTuple
 
 
 # -------------------- light ramp math --------------------
@@ -64,6 +65,79 @@ def compute_next_fire(
         if candidate.weekday() in enabled_days and candidate > now:
             return candidate
     return None
+
+
+class ScheduleDecision(NamedTuple):
+    """Outcome of deciding what the scheduler should do right now.
+
+    next_fire           the alarm_time we are aiming for (catch-up target if
+                        fire_now is set, otherwise the next future occurrence);
+                        None when nothing is scheduled.
+    ramp_start          next_fire - length_min, or None when next_fire is None.
+    fire_now            True when alarm_time on an enabled day has already
+                        passed within the grace window (HA was down) and we
+                        should fire the alarm immediately.
+    inside_ramp_window  True when now falls between ramp_start and next_fire
+                        (informational; lets callers decide on a partial ramp).
+    """
+
+    next_fire: datetime | None
+    ramp_start: datetime | None
+    fire_now: bool
+    inside_ramp_window: bool
+
+
+def plan_schedule(
+    now: datetime,
+    alarm_time: dt_time,
+    enabled_days: set[int],
+    length_min: int,
+    grace_min: int,
+) -> ScheduleDecision:
+    """Decide whether to fire now (catch-up), arm timers, or skip.
+
+    Wraps compute_next_fire and layers a restart catch-up window on top: if
+    today's alarm sits on an enabled day, has already passed, and did so within
+    `grace_min` minutes, we return fire_now=True targeting today so the alarm
+    still goes off after a late boot. Otherwise we return the next strictly
+    future occurrence with fire_now=False.
+
+    Pure: no Home Assistant imports, fully unit-testable.
+    """
+    if not enabled_days:
+        return ScheduleDecision(None, None, False, False)
+
+    length = timedelta(minutes=length_min)
+    today_at = now.replace(
+        hour=alarm_time.hour,
+        minute=alarm_time.minute,
+        second=alarm_time.second,
+        microsecond=0,
+    )
+
+    if (
+        today_at.weekday() in enabled_days
+        and today_at <= now
+        and (now - today_at) <= timedelta(minutes=grace_min)
+    ):
+        ramp_start = today_at - length
+        return ScheduleDecision(
+            next_fire=today_at,
+            ramp_start=ramp_start,
+            fire_now=True,
+            inside_ramp_window=ramp_start <= now,
+        )
+
+    future = compute_next_fire(now, alarm_time, enabled_days)
+    if future is None:
+        return ScheduleDecision(None, None, False, False)
+    ramp_start = future - length
+    return ScheduleDecision(
+        next_fire=future,
+        ramp_start=ramp_start,
+        fire_now=False,
+        inside_ramp_window=ramp_start <= now < future,
+    )
 
 
 # -------------------- notification action IDs --------------------
