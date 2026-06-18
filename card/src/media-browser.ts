@@ -13,6 +13,7 @@
  */
 import { LitElement, css, html, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import "./media-thumb";
 import type { HomeAssistant, MediaPickedItem } from "./types";
 
 interface MediaItem {
@@ -148,11 +149,11 @@ export class WakeAlarmMediaBrowser extends LitElement {
     const cls = `tile ${playable ? "playable" : ""} ${expandable ? "expandable" : ""}`;
     return html`
       <div class=${cls} @click=${() => this._onItemClick(item)} role="button" tabindex="0">
-        ${item.thumbnail
-          ? html`<img src=${item.thumbnail} alt="" />`
-          : html`<div class="placeholder">
-              <ha-icon icon=${expandable ? "mdi:folder-music" : "mdi:music"}></ha-icon>
-            </div>`}
+        <wake-alarm-thumb
+          .hass=${this.hass}
+          .thumbnail=${item.thumbnail}
+          icon=${expandable ? "mdi:folder-music" : "mdi:music"}
+        ></wake-alarm-thumb>
         <div class="title" title=${item.title}>${item.title}</div>
       </div>
     `;
@@ -164,6 +165,8 @@ export class WakeAlarmMediaBrowser extends LitElement {
       flex-direction: column;
       height: 100%;
       min-height: 0;
+      /* Opaque so the settings view behind the modal doesn't show through. */
+      background: var(--card-background-color);
     }
     .toolbar {
       display: flex;
@@ -212,18 +215,6 @@ export class WakeAlarmMediaBrowser extends LitElement {
       user-select: none;
     }
     .tile:hover { background: var(--ha-card-background, var(--card-background-color)); }
-    .tile img,
-    .tile .placeholder {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      object-fit: cover;
-      border-radius: 6px;
-      background: var(--card-background-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--secondary-text-color);
-    }
     .tile .title {
       font-size: 0.85rem;
       line-height: 1.2;
