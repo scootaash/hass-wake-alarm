@@ -1,0 +1,34 @@
+name: Validate
+
+# HACS + Home Assistant metadata validation. Kept separate from ci.yml (which
+# gates the code) so a HACS-rule change can't be mistaken for a code failure.
+# The scheduled run re-validates against the latest HACS/hassfest rules even
+# when nothing in the repo changed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
