@@ -409,7 +409,7 @@ function t(t,e,i,s){var a,o=arguments.length,r=o<3?e:null===s?s=Object.getOwnPro
       color: var(--secondary-text-color);
     }
     .error { color: var(--error-color, rgb(255, 82, 82)); }
-  `,t([pt({attribute:!1})],St.prototype,"hass",void 0),t([pt()],St.prototype,"entityId",void 0),t([ut()],St.prototype,"_children",void 0),t([ut()],St.prototype,"_path",void 0),t([ut()],St.prototype,"_loading",void 0),t([ut()],St.prototype,"_error",void 0),St=t([lt("wake-alarm-media-browser")],St);const Ct=[{key:"snooze_min",label:"Snooze (min)",description:"How long the snooze pause lasts before music resumes.",min:1,max:30,step:1},{key:"length_min",label:"Length (min)",description:"Total minutes the lights ramp up before the alarm time.",min:1,max:120,step:1},{key:"start_kelvin",label:"Start K",description:"Warm colour temperature at the beginning of the ramp.",min:1500,max:6500,step:50},{key:"target_kelvin",label:"Target K",description:"Cool colour temperature reached at the alarm time.",min:1500,max:6500,step:50},{key:"max_brightness_pct",label:"Max % Brightness",description:"Peak brightness reached at the alarm time.",min:1,max:100,step:1},{key:"volume",label:"Alarm Volume (%)",description:"Final volume the music fades up to. Defaults to a low value so test plays don't blast.",min:0,max:100,step:1,displayMultiplier:100},{key:"music_fade_sec",label:"Music fade (s)",description:"How long the volume takes to fade from 0 to the target volume.",min:0,max:300,step:5},{key:"auto_dismiss_min",label:"Auto-dismiss (min)",description:"Stop everything automatically after this long. 0 disables.",min:0,max:120,step:1}];let Pt=class extends nt{constructor(){super(...arguments),this._showMediaPicker=!1,this._openMediaPicker=()=>{this._showMediaPicker=!0},this._closeMediaPicker=()=>{this._showMediaPicker=!1},this._onMediaPicked=t=>{if(!this.hass||!this.related)return;const e=t.detail?.item;e&&(this.hass.callService("wake_alarm","set_media",{media_content_id:e.media_content_id,media_content_type:e.media_content_type,title:e.title??e.media_content_id,thumbnail:e.thumbnail},{entity_id:this.related.enabled}),this._closeMediaPicker())},this._openOptionsFlow=()=>{this.related&&(history.pushState(null,"","/config/integrations/integration/wake_alarm"),window.dispatchEvent(new Event("location-changed")))},this._goBack=()=>{this.dispatchEvent(new CustomEvent("navigate-back",{bubbles:!0,composed:!0}))}}shouldUpdate(t){return t.has("hass")||t.has("related")||t.has("_showMediaPicker")}render(){if(!this.hass||!this.related)return q``;const t=this.related,e=this.hass.states[t.sensors.state]?.state??"idle",i=this.hass.states[t.sensors.media_selection],s=i?.state??"none",a="none"!==s,o=i?.attributes?.thumbnail,r=this.hass.states[t.sensors.next_alarm],n=r?.attributes?.light_entities??[],c=r?.attributes?.media_player_entities??[],l=r?.attributes?.person_entity;return q`
+  `,t([pt({attribute:!1})],St.prototype,"hass",void 0),t([pt()],St.prototype,"entityId",void 0),t([ut()],St.prototype,"_children",void 0),t([ut()],St.prototype,"_path",void 0),t([ut()],St.prototype,"_loading",void 0),t([ut()],St.prototype,"_error",void 0),St=t([lt("wake-alarm-media-browser")],St);const Ct=[{key:"snooze_min",label:"Snooze (min)",description:"How long the snooze pause lasts before music resumes.",min:1,max:30,step:1},{key:"length_min",label:"Length (min)",description:"Total minutes the lights ramp up before the alarm time.",min:1,max:120,step:1},{key:"start_kelvin",label:"Start K",description:"Warm colour temperature at the beginning of the ramp.",min:1500,max:6500,step:50},{key:"target_kelvin",label:"Target K",description:"Cool colour temperature reached at the alarm time.",min:1500,max:6500,step:50},{key:"max_brightness_pct",label:"Max % Brightness",description:"Peak brightness reached at the alarm time.",min:1,max:100,step:1},{key:"volume",label:"Alarm Volume (%)",description:"Final volume the music fades up to. Defaults to a low value so test plays don't blast.",min:0,max:100,step:1,displayMultiplier:100},{key:"music_fade_sec",label:"Music fade (s)",description:"How long the volume takes to fade from 0 to the target volume.",min:0,max:300,step:5},{key:"auto_dismiss_min",label:"Auto-dismiss (min)",description:"Stop everything automatically after this long. 0 disables.",min:0,max:120,step:1}];let Pt=class extends nt{constructor(){super(...arguments),this._showMediaPicker=!1,this._openMediaPicker=()=>{this._showMediaPicker=!0},this._closeMediaPicker=()=>{this._showMediaPicker=!1},this._onMediaPicked=t=>{if(!this.hass||!this.related)return;const e=t.detail?.item;e&&(this.hass.callService("wake_alarm","set_media",{media_content_id:e.media_content_id,media_content_type:e.media_content_type,title:e.title??e.media_content_id,thumbnail:e.thumbnail},{entity_id:this.related.enabled}),this._closeMediaPicker())},this._openOptionsFlow=()=>{this.related&&(history.pushState(null,"","/config/integrations/integration/wake_alarm"),window.dispatchEvent(new Event("location-changed")))},this._goBack=()=>{this.dispatchEvent(new CustomEvent("navigate-back",{bubbles:!0,composed:!0}))}}shouldUpdate(t){return t.has("hass")||t.has("related")||t.has("_showMediaPicker")}render(){if(!this.hass||!this.related)return q``;const t=this.related,e=this.hass.states[t.sensors.state]?.state??"idle",i=this.hass.states[t.sensors.media_selection],s=i?.state??"none",a="none"!==s,o=i?.attributes?.thumbnail,r=this.hass.states[t.sensors.next_alarm],n=r?.attributes?.light_entities??[],c=r?.attributes?.media_player_entities??[],l=r?.attributes?.person_entity,d=function(t){return!!t&&t.length>0}(c);return q`
       <ha-card>
         <div class="header">
           <ha-icon-button label="Back" @click=${this._goBack}>
@@ -429,9 +429,9 @@ function t(t,e,i,s){var a,o=arguments.length,r=o<3?e:null===s?s=Object.getOwnPro
           ${"ramping"===e?q`<button class="btn" @click=${()=>this._press("cancel_ramp")}>
                 Cancel ramp
               </button>`:null}
-          <button class="btn" @click=${()=>this._press("test_music")}>
-            Test music
-          </button>
+          ${d?q`<button class="btn" @click=${()=>this._press("test_music")}>
+                Test music
+              </button>`:null}
           <button
             class="btn"
             @click=${()=>this._press("test_standard_notification")}
@@ -439,41 +439,41 @@ function t(t,e,i,s){var a,o=arguments.length,r=o<3?e:null===s?s=Object.getOwnPro
           >
             Test standard notification
           </button>
-          <button
-            class="btn"
-            @click=${()=>this._press("test_urgent_notification")}
-            title="Send the urgent (critical) notification now"
-          >
-            Test urgent notification
-          </button>
+          ${d?q`<button
+                class="btn"
+                @click=${()=>this._press("test_urgent_notification")}
+                title="Send the urgent (critical) notification now"
+              >
+                Test urgent notification
+              </button>`:null}
         </div>
 
-        <div class="section media">
-          <div class="section-title">Media</div>
-          <div class="media-row" @click=${this._openMediaPicker}>
-            ${a?q`
-                  <wake-alarm-thumb
-                    class="thumb"
-                    .hass=${this.hass}
-                    .thumbnail=${o??null}
-                    icon="mdi:music"
-                  ></wake-alarm-thumb>
-                  <div class="media-text">
-                    <div class="media-title">${s}</div>
-                    <div class="media-sub">Tap to change</div>
-                  </div>
-                `:q`
-                  <wake-alarm-thumb
-                    class="thumb"
-                    icon="mdi:music-note-plus"
-                  ></wake-alarm-thumb>
-                  <div class="media-text">
-                    <div class="media-title">No media picked</div>
-                    <div class="media-sub">Tap to choose</div>
-                  </div>
-                `}
-          </div>
-        </div>
+        ${d?q`<div class="section media">
+              <div class="section-title">Media</div>
+              <div class="media-row" @click=${this._openMediaPicker}>
+                ${a?q`
+                      <wake-alarm-thumb
+                        class="thumb"
+                        .hass=${this.hass}
+                        .thumbnail=${o??null}
+                        icon="mdi:music"
+                      ></wake-alarm-thumb>
+                      <div class="media-text">
+                        <div class="media-title">${s}</div>
+                        <div class="media-sub">Tap to change</div>
+                      </div>
+                    `:q`
+                      <wake-alarm-thumb
+                        class="thumb"
+                        icon="mdi:music-note-plus"
+                      ></wake-alarm-thumb>
+                      <div class="media-text">
+                        <div class="media-title">No media picked</div>
+                        <div class="media-sub">Tap to choose</div>
+                      </div>
+                    `}
+              </div>
+            </div>`:null}
 
         <div class="section">
           <div class="section-title">Targets</div>

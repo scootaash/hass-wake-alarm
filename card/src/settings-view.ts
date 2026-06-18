@@ -1,6 +1,7 @@
 import { LitElement, css, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
+import { showsMediaControls } from "./view-logic";
 import "./media-browser";
 import "./media-thumb";
 import type { HomeAssistant, MediaPickedItem, RelatedEntities } from "./types";
@@ -99,6 +100,7 @@ export class WakeAlarmSettingsView extends LitElement {
     const lights = (nextAlarm?.attributes?.light_entities as string[]) ?? [];
     const players = (nextAlarm?.attributes?.media_player_entities as string[]) ?? [];
     const person = nextAlarm?.attributes?.person_entity as string | null | undefined;
+    const showMedia = showsMediaControls(players);
 
     return html`
       <ha-card>
@@ -122,9 +124,11 @@ export class WakeAlarmSettingsView extends LitElement {
                 Cancel ramp
               </button>`
             : null}
-          <button class="btn" @click=${() => this._press("test_music")}>
-            Test music
-          </button>
+          ${showMedia
+            ? html`<button class="btn" @click=${() => this._press("test_music")}>
+                Test music
+              </button>`
+            : null}
           <button
             class="btn"
             @click=${() => this._press("test_standard_notification")}
@@ -132,43 +136,47 @@ export class WakeAlarmSettingsView extends LitElement {
           >
             Test standard notification
           </button>
-          <button
-            class="btn"
-            @click=${() => this._press("test_urgent_notification")}
-            title="Send the urgent (critical) notification now"
-          >
-            Test urgent notification
-          </button>
+          ${showMedia
+            ? html`<button
+                class="btn"
+                @click=${() => this._press("test_urgent_notification")}
+                title="Send the urgent (critical) notification now"
+              >
+                Test urgent notification
+              </button>`
+            : null}
         </div>
 
-        <div class="section media">
-          <div class="section-title">Media</div>
-          <div class="media-row" @click=${this._openMediaPicker}>
-            ${hasMedia
-              ? html`
-                  <wake-alarm-thumb
-                    class="thumb"
-                    .hass=${this.hass}
-                    .thumbnail=${mediaThumb ?? null}
-                    icon="mdi:music"
-                  ></wake-alarm-thumb>
-                  <div class="media-text">
-                    <div class="media-title">${mediaTitle}</div>
-                    <div class="media-sub">Tap to change</div>
-                  </div>
-                `
-              : html`
-                  <wake-alarm-thumb
-                    class="thumb"
-                    icon="mdi:music-note-plus"
-                  ></wake-alarm-thumb>
-                  <div class="media-text">
-                    <div class="media-title">No media picked</div>
-                    <div class="media-sub">Tap to choose</div>
-                  </div>
-                `}
-          </div>
-        </div>
+        ${showMedia
+          ? html`<div class="section media">
+              <div class="section-title">Media</div>
+              <div class="media-row" @click=${this._openMediaPicker}>
+                ${hasMedia
+                  ? html`
+                      <wake-alarm-thumb
+                        class="thumb"
+                        .hass=${this.hass}
+                        .thumbnail=${mediaThumb ?? null}
+                        icon="mdi:music"
+                      ></wake-alarm-thumb>
+                      <div class="media-text">
+                        <div class="media-title">${mediaTitle}</div>
+                        <div class="media-sub">Tap to change</div>
+                      </div>
+                    `
+                  : html`
+                      <wake-alarm-thumb
+                        class="thumb"
+                        icon="mdi:music-note-plus"
+                      ></wake-alarm-thumb>
+                      <div class="media-text">
+                        <div class="media-title">No media picked</div>
+                        <div class="media-sub">Tap to choose</div>
+                      </div>
+                    `}
+              </div>
+            </div>`
+          : null}
 
         <div class="section">
           <div class="section-title">Targets</div>
