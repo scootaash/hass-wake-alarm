@@ -12,6 +12,17 @@ filterwarnings = [
   "ignore::DeprecationWarning",
 ]
 
+[tool.coverage.run]
+# Measure the integration package (the coordinator/state machine is what we
+# care about). Branch coverage flags un-taken if/else paths, not just lines.
+source = ["custom_components/wake_alarm"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# Advisory only for now: CI prints the number and the untested lines so blind
+# spots are visible on every run, but there's no enforced minimum threshold.
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"

@@ -59,10 +59,10 @@ jobs:
 
       - name: Install test deps
         # PHACC pulls a matching homeassistant + freezegun transitively.
-        run: pip install pytest pytest-asyncio "pytest-homeassistant-custom-component==${{ matrix.phacc }}" ${{ matrix.extra_pins }}
+        run: pip install pytest pytest-asyncio pytest-cov "pytest-homeassistant-custom-component==${{ matrix.phacc }}" ${{ matrix.extra_pins }}
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: pytest tests/ -v --cov --cov-report=term-missing
 
   card:
     name: card lint + test + build

@@ -7,5 +7,6 @@
 # Python 3.13.
 pytest
 pytest-asyncio
+pytest-cov
 pytest-homeassistant-custom-component==0.13.316
 ruff
