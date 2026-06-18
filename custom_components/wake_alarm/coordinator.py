@@ -120,6 +120,11 @@ class WakeAlarmCoordinator:
         # alarm time) and the after-script (run once when it ends). See #24.
         self._cycle_active: bool = False
 
+        # Fire-and-forget tasks (catch-up fire, mid-cycle dismiss, before/after
+        # scripts). Tracked so async_unload can cancel anything still in flight
+        # rather than leaving it to run against a torn-down entry (#35).
+        self._background_tasks: set[asyncio.Task] = set()
+
     # -------------------- public state --------------------
 
     @property
@@ -163,6 +168,14 @@ class WakeAlarmCoordinator:
                 cb()
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("listener for %s raised", self.slug)
+
+    @callback
+    def _track_task(self, coro) -> asyncio.Task:
+        """Create a background task tracked for cancellation on unload (#35)."""
+        task = self.hass.async_create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     # -------------------- lifecycle --------------------
 
@@ -210,6 +223,10 @@ class WakeAlarmCoordinator:
             self._music_task.cancel()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
+        # Cancel any fire-and-forget tasks still in flight (#35).
+        for task in list(self._background_tasks):
+            task.cancel()
+        self._background_tasks.clear()
 
     # -------------------- scheduling --------------------
 
@@ -224,7 +241,7 @@ class WakeAlarmCoordinator:
                 and new_state.state == "off"
                 and self.is_active
             ):
-                self.hass.async_create_task(self.async_dismiss())
+                self._track_task(self.async_dismiss())
                 return
         self.async_recompute_schedule()
 
@@ -273,7 +290,7 @@ class WakeAlarmCoordinator:
             # HA was down past alarm_time but within grace: fire the alarm now.
             # Music only — a partial ramp from a cold boot adds no value. The
             # alarm callback rolls the schedule forward to the next day itself.
-            self.hass.async_create_task(self._async_on_alarm(dt_util.now()))
+            self._track_task(self._async_on_alarm(dt_util.now()))
         else:
             now = dt_util.now()
             if (
@@ -646,7 +663,10 @@ class WakeAlarmCoordinator:
             if self._music_cancel_event is not None:
                 self._music_cancel_event.set()
 
-        self._cancel_auto_dismiss()
+        # Leave the auto-dismiss timer armed across the snooze so "stop after N
+        # minutes" is honoured even mid-snooze (#38). The deadline is fixed at
+        # the first fire and never extended, so a long snooze can't push the
+        # stop past it.
         self._set_state(STATE_SNOOZING)
 
         snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
@@ -759,9 +779,8 @@ class WakeAlarmCoordinator:
             self._auto_dismiss_deadline = dt_util.now() + timedelta(minutes=minutes)
         remaining = (self._auto_dismiss_deadline - dt_util.now()).total_seconds()
         if remaining <= 0:
-            # Already past the deadline (e.g. a long snooze pushed us
-            # past it) — fire immediately.
-            self.hass.async_create_task(self.async_dismiss())
+            # Already past the deadline — fire immediately.
+            self._track_task(self.async_dismiss())
             return
         self._auto_dismiss_cancel = async_call_later(
             self.hass,
@@ -771,7 +790,9 @@ class WakeAlarmCoordinator:
 
     async def _async_auto_dismiss_fire(self, _now: datetime) -> None:
         self._auto_dismiss_cancel = None
-        if self._state != STATE_PLAYING:
+        # Fire while PLAYING or SNOOZING — a snooze in progress must not let the
+        # alarm outlive the configured auto-dismiss window (#38).
+        if self._state not in (STATE_PLAYING, STATE_SNOOZING):
             return
         _LOGGER.info("auto-dismiss firing for %s", self.slug)
         await self.async_dismiss()
@@ -944,14 +965,15 @@ class WakeAlarmCoordinator:
     def _run_script(self, conf_key: str, label: str) -> None:
         """Fire-and-forget the configured before/after script, if any.
 
-        Never awaited from the alarm path so a slow or failing script can
-        never delay the wake-up. The instance slug + name are passed as script
+        Runs in a tracked background task, never awaited from the alarm path,
+        so a slow or failing script can never delay the wake-up (and is
+        cancelled on unload). The instance slug + name are passed as script
         variables for context.
         """
         target = self.entry.data.get(conf_key)
         if not target:
             return
-        self.hass.async_create_task(self._async_call_script(target, label))
+        self._track_task(self._async_call_script(target, label))
 
     async def _async_call_script(self, target: str, label: str) -> None:
         domain, _, object_id = target.partition(".")
@@ -964,11 +986,15 @@ class WakeAlarmCoordinator:
             )
             return
         try:
+            # blocking=True so this tracked task actually represents the
+            # script's run and the except below catches real execution errors;
+            # the wake-up is never delayed because this runs off the alarm path
+            # in its own background task (#35).
             await self.hass.services.async_call(
                 "script",
                 object_id,
                 {"slug": self.slug, "name": self.name},
-                blocking=False,
+                blocking=True,
             )
         except Exception:  # noqa: BLE001
             _LOGGER.exception(

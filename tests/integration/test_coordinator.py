@@ -423,6 +423,32 @@ async def test_auto_dismiss_deadline_not_extended_by_snooze(
     assert coord._auto_dismiss_deadline == at(7, 30)
 
 
+async def test_auto_dismiss_fires_during_snooze(env, freezer) -> None:
+    """#38: a snooze in progress must not let the alarm outlive auto-dismiss."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(
+        env.make_entry(), days=SAT, snooze_min=10, auto_dismiss_min=2
+    )
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert coord.state == STATE_PLAYING
+    assert coord._auto_dismiss_deadline == at(7, 2)
+
+    # Snooze for 10 min at 07:00 — without the fix this would resume music at
+    # 07:10, well past the 07:02 auto-dismiss deadline.
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # The deadline lands mid-snooze: auto-dismiss fires and stops everything.
+    await fire(env.hass, freezer, at(7, 2))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    assert env.music.calls == 1  # snooze never resumed
+    assert coord.next_fire == NEXT_WEEK
+
+
 async def test_dismiss_during_ramp_skips_today(env, freezer) -> None:
     """Dismiss before alarm_time rolls past today; the alarm never fires."""
     freezer.move_to(at(5, 0))
@@ -640,6 +666,35 @@ async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
     assert env.music.calls == 0
     assert len(after) == 0  # alarm gated → after not appropriate
     assert coord._cycle_active is False  # but the cycle is reset for next time
+
+
+# --------------------------------------------------------------------------
+# teardown / unload (#35)
+# --------------------------------------------------------------------------
+
+
+async def test_double_unload_is_idempotent(env, freezer) -> None:
+    """async_unload must be safe to call twice (and clear tracked tasks)."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+    await coord.async_unload()
+    await coord.async_unload()  # must not raise
+    assert coord._background_tasks == set()
+
+
+async def test_unload_mid_ramp_cancels_ramp_task(env, freezer) -> None:
+    """Unloading while the ramp is running cancels the task, leaving nothing."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+
+    env.ramp.block()
+    await fire_until_started(env.hass, freezer, at(6, 45), env.ramp)
+    assert coord.state == STATE_RAMPING
+
+    await coord.async_unload()
+    await env.hass.async_block_till_done()
+    assert coord._ramp_task is None
+    assert coord._background_tasks == set()
 
 
 # --------------------------------------------------------------------------
