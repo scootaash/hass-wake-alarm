@@ -1,7 +1,6 @@
 """The Wake Alarm integration."""
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.loader import async_get_integration
 
 from .const import (
     CONF_SLUG,
@@ -26,7 +26,6 @@ _LOGGER = logging.getLogger(__name__)
 # bundle as a static path at this URL and tells the frontend to load it.
 _CARD_PATH_PART = "/wake_alarm/wake-alarm-card.js"
 _CARD_PATH = Path(__file__).parent / "www" / "wake-alarm-card.js"
-_MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 
 # Bookkeeping key inside hass.data[DOMAIN]; underscore-prefixed so the
 # entry-id lookup ignores it.
@@ -119,13 +118,15 @@ async def async_migrate_entry(
     return True
 
 
-def _read_integration_version() -> str:
-    """Return the integration's manifest version, falling back to 'dev'."""
-    try:
-        with _MANIFEST_PATH.open(encoding="utf-8") as f:
-            return str(json.load(f).get("version", "dev"))
-    except OSError:
-        return "dev"
+async def _async_card_version(hass: HomeAssistant) -> str:
+    """Return the integration's manifest version for cache-busting.
+
+    Uses the loader, which reads the manifest off the event loop and caches it,
+    rather than opening manifest.json synchronously (the #20 blocking call).
+    Falls back to 'dev' if the version is missing.
+    """
+    integration = await async_get_integration(hass, DOMAIN)
+    return str(integration.version) if integration.version else "dev"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
@@ -149,19 +150,31 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         )
         return
 
-    # Modern API (HA 2024.7+) takes a list of StaticPathConfig objects;
-    # older versions had register_static_path. Use whichever is available.
-    if hasattr(hass.http, "async_register_static_paths"):
-        from homeassistant.components.http import StaticPathConfig
-
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(_CARD_PATH_PART, str(_CARD_PATH), True)]
-        )
-    else:
-        hass.http.register_static_path(_CARD_PATH_PART, str(_CARD_PATH), True)
-
-    version = _read_integration_version()
-    versioned_url = f"{_CARD_PATH_PART}?v={version}"
-    add_extra_js_url(hass, versioned_url)
+    # Claim the flag before the first await. HA sets up multiple config entries
+    # of a domain concurrently; if we only set this after awaiting the static
+    # path registration, two entries both pass the guard above and the second
+    # raises "method GET is already registered" (#19). Setting it here is
+    # event-loop-atomic (no await between the guard check and this line). Roll
+    # back on failure so a later retry can still register.
     domain_data[_CARD_REGISTERED_KEY] = True
+    try:
+        # Modern API (HA 2024.7+) takes a list of StaticPathConfig objects;
+        # older versions had register_static_path. Use whichever is available.
+        if hasattr(hass.http, "async_register_static_paths"):
+            from homeassistant.components.http import StaticPathConfig
+
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(_CARD_PATH_PART, str(_CARD_PATH), True)]
+            )
+        else:
+            hass.http.register_static_path(
+                _CARD_PATH_PART, str(_CARD_PATH), True
+            )
+
+        version = await _async_card_version(hass)
+        versioned_url = f"{_CARD_PATH_PART}?v={version}"
+        add_extra_js_url(hass, versioned_url)
+    except Exception:
+        domain_data[_CARD_REGISTERED_KEY] = False
+        raise
     _LOGGER.info("registered wake-alarm-card at %s", versioned_url)
