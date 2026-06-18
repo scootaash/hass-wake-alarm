@@ -702,6 +702,65 @@ async def test_unload_mid_ramp_cancels_ramp_task(env, freezer) -> None:
 # --------------------------------------------------------------------------
 
 
+async def test_setting_change_during_playback_no_same_day_refire(
+    env, freezer
+) -> None:
+    """#44: editing the alarm time while PLAYING must not arm a second fire
+    today; the change is deferred and applied (skipping today) on settle."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert coord.state == STATE_PLAYING
+    # The schedule already rolled forward to next week when the alarm fired.
+    assert coord.next_fire == NEXT_WEEK
+
+    # User pushes the alarm later the same day while it's still playing. The
+    # dependency-change callback runs synchronously on async_set, so we don't
+    # block_till_done here (the music runner is held and would never settle).
+    env.hass.states.async_set("time.test_alarm_time", "07:30:00")
+    await asyncio.sleep(0)
+    # Deferred: next_fire is untouched, NOT re-pointed at today 07:30.
+    assert coord.next_fire == NEXT_WEEK
+    assert coord._recompute_pending is True
+
+    env.music.release()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    # Now applied: next week at the new time, today skipped.
+    assert coord.next_fire == NEXT_WEEK + timedelta(minutes=30)
+    assert coord._recompute_pending is False
+
+    # Nothing fires at today 07:30.
+    await fire(env.hass, freezer, at(7, 30))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+
+
+async def test_test_music_ignored_during_ramp_alarm_gap(env, freezer) -> None:
+    """#43: Test music pressed in the ramp→alarm IDLE gap is refused, so it
+    can't occupy the music task and silence the real alarm."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+
+    # Ramp fires and settles; the occurrence stays open across the gap.
+    await fire(env.hass, freezer, at(6, 45))
+    assert coord.state == STATE_IDLE
+    assert coord._cycle_active is True
+
+    # Test music in the gap is rejected (IDLE, but a cycle is in flight).
+    await coord.async_test_music()
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.state == STATE_IDLE
+
+    # The real alarm still plays music exactly once.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+
+
 async def test_alarm_time_change_rearms_timers(env, freezer) -> None:
     freezer.move_to(at(5, 0))
     coord = await env.build(env.make_entry(), days=SAT)

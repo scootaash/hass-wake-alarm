@@ -125,6 +125,11 @@ class WakeAlarmCoordinator:
         # rather than leaving it to run against a torn-down entry (#35).
         self._background_tasks: set[asyncio.Task] = set()
 
+        # A dependency change (alarm time / length / day toggles) that arrives
+        # while the alarm is already PLAYING/SNOOZING is deferred to the next
+        # IDLE settle, so it can never arm a second fire for the same day (#44).
+        self._recompute_pending: bool = False
+
     # -------------------- public state --------------------
 
     @property
@@ -243,6 +248,14 @@ class WakeAlarmCoordinator:
             ):
                 self._track_task(self.async_dismiss())
                 return
+        if self._state in (STATE_PLAYING, STATE_SNOOZING):
+            # The alarm has already fired today. Re-arming the schedule now off
+            # a settings change could select today's (still-future) occurrence
+            # again and fire a second time the same morning (#44). Defer the
+            # recompute until the occurrence settles back to IDLE, where it is
+            # applied with skip_today.
+            self._recompute_pending = True
+            return
         self.async_recompute_schedule()
 
     @callback
@@ -266,6 +279,8 @@ class WakeAlarmCoordinator:
         skip_today exclude today's occurrence entirely — used by dismiss, which
                    means "not this one", even when today's alarm is still ahead.
         """
+        # Any explicit recompute consumes a pending deferred one (#44).
+        self._recompute_pending = False
         self._cancel_scheduled_timers()
 
         decision = self._compute_schedule(
@@ -504,11 +519,15 @@ class WakeAlarmCoordinator:
 
     async def async_test_light_ramp(self) -> None:
         """User-pressed test-ramp button: run the ramp standalone."""
-        if self._state != STATE_IDLE:
+        if self._state != STATE_IDLE or self._cycle_active:
+            # _cycle_active guards the ramp→alarm IDLE gap: the state reads IDLE
+            # but a real occurrence is in flight, so a test press here would
+            # collide with the imminent alarm (#43).
             _LOGGER.warning(
-                "test_light_ramp ignored for %s: state=%s",
+                "test_light_ramp ignored for %s: state=%s cycle_active=%s",
                 self.slug,
                 self._state,
+                self._cycle_active,
             )
             return
         await self._async_start_ramp(end_state=STATE_IDLE)
@@ -552,11 +571,15 @@ class WakeAlarmCoordinator:
 
     async def async_test_music(self) -> None:
         """User-pressed test-music button: run the sequence standalone."""
-        if self._state != STATE_IDLE:
+        if self._state != STATE_IDLE or self._cycle_active:
+            # _cycle_active guards the ramp→alarm IDLE gap: starting test music
+            # there would occupy the music task and the real alarm's music
+            # start would then be skipped, silencing the wake-up (#43).
             _LOGGER.warning(
-                "test_music ignored for %s: state=%s",
+                "test_music ignored for %s: state=%s cycle_active=%s",
                 self.slug,
                 self._state,
+                self._cycle_active,
             )
             return
         await self._async_start_music(end_state=STATE_IDLE)
@@ -1024,6 +1047,12 @@ class WakeAlarmCoordinator:
             # re-fire when it finished a few seconds before alarm_time.
             self._clear_auto_dismiss_deadline()
         self._notify_listeners()
+        if new_state == STATE_IDLE and self._recompute_pending:
+            # A settings change arrived while the alarm was firing (#44). Apply
+            # it now that the occurrence is over, skipping today — the
+            # occurrence that just ended already fired today.
+            self._recompute_pending = False
+            self.async_recompute_schedule(skip_today=True)
 
     # -------------------- state readers --------------------
 
