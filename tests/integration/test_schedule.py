@@ -82,19 +82,99 @@ class TestComputeNextFire:
         assert (result - now).days >= 6
 
 
+class TestPlanSchedule:
+    """plan_schedule: restart catch-up + arming decision (pure)."""
+
+    SAT = {5}  # 2026-05-09 is a Saturday
+    GRACE = 15
+
+    def test_missed_within_grace_fires_now(self, pure: ModuleType) -> None:
+        # 5 minutes after a 06:00 alarm that we missed (HA was down).
+        now = datetime(2026, 5, 9, 6, 5, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 30, self.GRACE)
+        assert d.fire_now is True
+        assert d.next_fire == datetime(2026, 5, 9, 6, 0, tzinfo=timezone.utc)
+        assert d.ramp_start == datetime(2026, 5, 9, 5, 30, tzinfo=timezone.utc)
+
+    def test_missed_beyond_grace_rolls_forward(self, pure: ModuleType) -> None:
+        # 20 minutes after the alarm, past the 15-minute grace → next week.
+        now = datetime(2026, 5, 9, 6, 20, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 30, self.GRACE)
+        assert d.fire_now is False
+        assert d.next_fire == datetime(2026, 5, 16, 6, 0, tzinfo=timezone.utc)
+
+    def test_grace_boundary_is_inclusive(self, pure: ModuleType) -> None:
+        # Exactly grace minutes after the alarm still counts as catch-up.
+        now = datetime(2026, 5, 9, 6, 15, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 30, self.GRACE)
+        assert d.fire_now is True
+
+    def test_future_alarm_arms_not_fires(self, pure: ModuleType) -> None:
+        # An hour before the alarm: normal arm, no catch-up.
+        now = datetime(2026, 5, 9, 5, 0, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 30, self.GRACE)
+        assert d.fire_now is False
+        assert d.next_fire == datetime(2026, 5, 9, 6, 0, tzinfo=timezone.utc)
+        assert d.ramp_start == datetime(2026, 5, 9, 5, 30, tzinfo=timezone.utc)
+        # now (05:00) is before ramp_start (05:30) → not inside the window.
+        assert d.inside_ramp_window is False
+
+    def test_inside_ramp_window_detected(self, pure: ModuleType) -> None:
+        # Between ramp_start (05:30) and alarm (06:00).
+        now = datetime(2026, 5, 9, 5, 45, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 30, self.GRACE)
+        assert d.fire_now is False
+        assert d.inside_ramp_window is True
+
+    def test_missed_today_but_today_disabled_no_catchup(
+        self, pure: ModuleType
+    ) -> None:
+        # 5 min after 06:00 on Saturday, but only Monday is enabled →
+        # no catch-up, roll forward to Monday.
+        now = datetime(2026, 5, 9, 6, 5, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), {0}, 30, self.GRACE)
+        assert d.fire_now is False
+        assert d.next_fire == datetime(2026, 5, 11, 6, 0, tzinfo=timezone.utc)
+
+    def test_zero_length_ramp_start_equals_next_fire(
+        self, pure: ModuleType
+    ) -> None:
+        now = datetime(2026, 5, 9, 5, 0, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), self.SAT, 0, self.GRACE)
+        assert d.ramp_start == d.next_fire
+
+    def test_no_enabled_days_returns_empty(self, pure: ModuleType) -> None:
+        now = datetime(2026, 5, 9, 6, 5, tzinfo=timezone.utc)
+        d = pure.plan_schedule(now, dt_time(6, 0), set(), 30, self.GRACE)
+        assert d.next_fire is None and d.fire_now is False
+
+    def test_dst_spring_forward_catchup(self, pure: ModuleType) -> None:
+        # 2026-03-29 UK clocks-forward Sunday; alarm 07:00 local, booting at
+        # 07:05 local should catch up to 07:00 the same morning.
+        london = ZoneInfo("Europe/London")
+        now = datetime(2026, 3, 29, 7, 5, tzinfo=london)
+        d = pure.plan_schedule(now, dt_time(7, 0), {6}, 30, self.GRACE)
+        assert d.fire_now is True
+        assert d.next_fire.hour == 7
+        assert d.next_fire.date() == now.date()
+
+
 class TestRescheduleTrap:
     """Regression guard for the mid-cycle ramp-restart bug.
 
-    When a ramp finishes a few seconds *before* alarm_time, recomputing the
-    schedule at that instant re-selects today's alarm (still strictly in the
-    future), whose ramp_start (alarm_time - length) is already in the past.
+    When a ramp finished a few seconds *before* alarm_time, recomputing the
+    schedule at that instant re-selected today's alarm (still strictly in the
+    future), whose ramp_start (alarm_time - length) was already in the past.
     async_track_point_in_time fires past targets immediately, so the alarm
-    would restart its ramp from zero. The coordinator now guards against this
-    by not recomputing while a music-start is pending; this test documents the
-    trap so the underlying compute_next_fire behaviour stays understood.
+    restarted its ramp from zero.
+
+    The fix is structural: the coordinator no longer recomputes on the IDLE
+    transition. Its non-catch-up recompute only runs when now >= alarm_time
+    (the alarm firing), where compute_next_fire deterministically rolls to the
+    next enabled day. These tests pin both halves of that invariant.
     """
 
-    def test_recompute_just_before_alarm_picks_today_with_past_ramp_start(
+    def test_recompute_just_before_alarm_would_pick_today(
         self, pure: ModuleType
     ) -> None:
         length_min = 30
@@ -104,10 +184,18 @@ class TestRescheduleTrap:
         assert next_fire is not None
         # Today's alarm is still selected (strictly in the future)...
         assert next_fire == datetime(2026, 5, 9, 6, 0, tzinfo=timezone.utc)
-        # ...and its ramp_start is in the past, which is exactly why an
-        # unguarded reschedule here re-fired the ramp immediately.
+        # ...with a past ramp_start — which is exactly why the coordinator must
+        # NOT recompute at this moment (it no longer does).
         ramp_start = next_fire - timedelta(minutes=length_min)
         assert ramp_start < now
+
+    def test_recompute_at_alarm_time_rolls_to_next_day(
+        self, pure: ModuleType
+    ) -> None:
+        # The safe recompute moment: at/after alarm_time, today is excluded.
+        now = datetime(2026, 5, 9, 6, 0, tzinfo=timezone.utc)
+        next_fire = pure.compute_next_fire(now, dt_time(6, 0), {5})
+        assert next_fire == datetime(2026, 5, 16, 6, 0, tzinfo=timezone.utc)
 
 
 class TestActionId:

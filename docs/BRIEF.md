@@ -170,16 +170,30 @@ A single `WakeAlarmCoordinator` per config entry, owning the state machine and s
 - `playing`: music sequence active (after alarm_time)
 - `snoozing`: snooze timer running, awaiting replay
 
-**Scheduling:** the coordinator computes the next fire time from `time.<slug>_alarm_time`, the day switches, and current local time. Uses `async_track_point_in_time(hass, callback, ramp_start_dt)` where `ramp_start_dt = alarm_time - length`. Recomputes whenever any of those entities change state. **No minute-pattern polling** (replaces the existing YAML's `time_pattern` triggers).
+**Scheduling:** the coordinator computes the next fire time from `time.<slug>_alarm_time`, the day switches, and current local time, then arms **two independent timers** with `async_track_point_in_time`:
 
-**On fire:**
+- a **light-ramp timer** at `ramp_start = alarm_time - length`, and
+- an **alarm (music) timer** at `alarm_time`.
 
-1. Check `switch.<slug>_enabled`. If off, abort silently.
-2. Check person presence if configured. If person not home, abort silently and recompute next fire.
-3. Transition state to `ramping`. Start the light ramp task.
-4. Schedule music start at `alarm_time` via another `async_track_point_in_time`.
-5. At alarm_time: check media_player availability. If any required player is unavailable, send the urgent notification and skip music. Lights continue ramping to completion, then transition to `idle`. If players are available, transition to `playing`, start the music sequence, and send the standard notification.
-6. After `auto_dismiss_min` minutes (if configured > 0): trigger dismiss automatically.
+The music timer is the safety-critical one and does **not** depend on the light ramp running — a failure anywhere in the light path (callback never runs, raises, lights misconfigured, presence fails at ramp-start) can never stop the alarm from sounding. Recomputes whenever any dependency entity changes state. **No minute-pattern polling** (replaces the existing YAML's `time_pattern` triggers).
+
+The schedule rolls forward to the next enabled day **only when the alarm timer fires** (at which point `now >= alarm_time`, so the next-occurrence computation deterministically skips today). It is *not* recomputed on the return to `idle`. This is what eliminates the old restart loop where a ramp finishing a few seconds before `alarm_time` re-selected today's still-future alarm and re-fired its (now past) ramp_start immediately.
+
+**On the light-ramp timer (ramp_start):**
+
+1. Check `switch.<slug>_enabled`. If off, do nothing (the alarm timer is still armed).
+2. Check person presence if configured. If not home, skip the ramp (the alarm timer re-checks presence independently at alarm_time). No recompute.
+3. Transition state to `ramping` and start the light ramp task. An exception here is contained to the lights.
+
+**On the alarm timer (alarm_time):**
+
+1. Check `switch.<slug>_enabled`. If off, abort.
+2. **Re-check person presence** (fresh, independent of the ramp-start check). If not home, abort.
+3. Check media_player availability. If any required player is unavailable, send the urgent notification and skip music. If no media is selected, send the no-media notification and skip music. Otherwise transition to `playing`, start the music sequence, and send the standard notification.
+4. In all cases, roll the schedule forward to the next enabled day afterwards.
+5. After `auto_dismiss_min` minutes (if configured > 0): trigger dismiss automatically.
+
+Because presence is evaluated separately for each timer, someone who was out at `ramp_start` but home by `alarm_time` is still woken (and vice versa: lights ramp, but no music if they've left).
 
 ### Light ramp algorithm
 
@@ -239,10 +253,10 @@ Two paths.
 
 1. Stop music on all configured players (`media_player.media_stop`)
 2. Unjoin any group formed
-3. Cancel any pending ramp, snooze, or auto-dismiss task
+3. Cancel both scheduled timers and any pending ramp, snooze, or auto-dismiss task
 4. Lights left as the user has them (no override)
 5. Transition to `idle`
-6. Compute next scheduled fire time
+6. Recompute the schedule, **skipping today's occurrence** — dismiss means "not this one", so even a dismiss during the ramp (before alarm_time) rolls forward to the next enabled day rather than re-selecting today
 
 ### Mobile notifications
 
@@ -280,10 +294,14 @@ All accept a `target` (entity_id of any of the integration's button entities, us
 
 ### Person presence behaviour
 
-- If `person_entity` configured and not `home` at the moment the coordinator would transition to `ramping`: log info, skip the entire sequence, recompute next fire. No notification sent.
-- If `person_entity` not configured: no check applied, alarm always fires.
+Presence is checked **twice, independently**, because the light and music timers are decoupled:
 
-This is **applied consistently to the whole sequence**, unlike the existing YAML which only checks on the pre-phase.
+- At `ramp_start`, for the **lights**: if `person_entity` is configured and not `home`, skip the light ramp (log info, no notification).
+- At `alarm_time`, for the **music**: a fresh check is made. If not `home`, skip the music (no notification).
+
+This means someone who is out at `ramp_start` but home by `alarm_time` is still woken by the music, and someone who leaves between the two gets no music even if the lights already ramped.
+
+- If `person_entity` not configured: no check applied, both phases always fire.
 
 ### Mid-cycle disable
 
@@ -292,6 +310,8 @@ If `switch.<slug>_enabled` flips to off while in any non-idle state, the coordin
 ### Restart behaviour
 
 Use `RestoreEntity` for state-bearing entities to preserve user-tweaked values. For the state machine: regardless of restored state, transition to `idle` on startup and recompute next fire time. Don't attempt to resume an interrupted ramp or music; clean slate is safer.
+
+**Catch-up on restart:** if Home Assistant was down across `alarm_time` but boots back up within `CATCHUP_GRACE_MIN` minutes (default 15), the startup recompute fires the alarm immediately so the user is still woken. The light ramp is **not** replayed in this case (a partial ramp from a cold boot adds no value); music — the safety-critical part — fires, and the schedule then rolls forward to the next day. Beyond the grace window, the schedule simply rolls forward with no catch-up.
 
 ## Custom Lovelace Card
 

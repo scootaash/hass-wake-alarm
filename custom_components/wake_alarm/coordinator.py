@@ -35,6 +35,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CATCHUP_GRACE_MIN,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_PERSON_ENTITY,
@@ -48,7 +49,7 @@ from .const import (
     STATE_RAMPING,
     STATE_SNOOZING,
 )
-from ._pure import compute_next_fire
+from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .light_ramp import async_run_light_ramp
 from .music_sequence import async_run_music_sequence
 from .notifications import (
@@ -76,7 +77,11 @@ class WakeAlarmCoordinator:
         self._next_fire: datetime | None = None
         self._next_ramp_start: datetime | None = None
 
-        self._cancel_schedule: CALLBACK_TYPE | None = None
+        # Two independent timers: the light ramp is armed at ramp_start, the
+        # authoritative wake-up (music) at alarm_time. Decoupling them means a
+        # failure in the light path can never stop the alarm from sounding.
+        self._cancel_ramp_schedule: CALLBACK_TYPE | None = None
+        self._cancel_alarm_schedule: CALLBACK_TYPE | None = None
         self._cancel_listeners: list[CALLBACK_TYPE] = []
         self._update_callbacks: list[Callable[[], None]] = []
 
@@ -105,16 +110,6 @@ class WakeAlarmCoordinator:
         # always elapses N minutes after the alarm originally fired —
         # never extended by repeat snoozes.
         self._auto_dismiss_deadline: datetime | None = None
-
-        # Music-start callback scheduled from _async_on_fire
-        self._cancel_music_start: CALLBACK_TYPE | None = None
-        # True from the moment a fire arms its music-start (scheduled or
-        # immediate) until that music-start callback runs or is cancelled.
-        # While set, a ramp that finishes early must NOT roll us back to IDLE
-        # and recompute the schedule — doing so would re-select the in-flight
-        # alarm (whose fire time is still a few seconds in the future) and
-        # restart the whole ramp. See _ramp_runner / _async_on_fire.
-        self._music_start_pending: bool = False
 
     # -------------------- public state --------------------
 
@@ -186,15 +181,15 @@ class WakeAlarmCoordinator:
                 )
             )
 
-        self.async_recompute_schedule()
+        # catch_up=True: if HA was down past today's alarm but is back within
+        # the grace window, fire it now rather than waiting for tomorrow.
+        self.async_recompute_schedule(catch_up=True)
 
     async def async_unload(self) -> None:
         for cancel in self._cancel_listeners:
             cancel()
         self._cancel_listeners.clear()
-        if self._cancel_schedule is not None:
-            self._cancel_schedule()
-            self._cancel_schedule = None
+        self._cancel_scheduled_timers()
         # Cancel any in-flight ramp / music / snooze / auto-dismiss
         if self._ramp_cancel_event is not None:
             self._ramp_cancel_event.set()
@@ -206,7 +201,6 @@ class WakeAlarmCoordinator:
             self._music_task.cancel()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
-        self._cancel_pending_music_start()
 
     # -------------------- scheduling --------------------
 
@@ -226,27 +220,64 @@ class WakeAlarmCoordinator:
         self.async_recompute_schedule()
 
     @callback
-    def async_recompute_schedule(self) -> None:
-        """(Re)compute next fire time and (re)arm the timer."""
-        if self._cancel_schedule is not None:
-            self._cancel_schedule()
-            self._cancel_schedule = None
+    def _cancel_scheduled_timers(self) -> None:
+        """Cancel both the ramp and alarm point-in-time timers."""
+        if self._cancel_ramp_schedule is not None:
+            self._cancel_ramp_schedule()
+            self._cancel_ramp_schedule = None
+        if self._cancel_alarm_schedule is not None:
+            self._cancel_alarm_schedule()
+            self._cancel_alarm_schedule = None
 
-        next_fire = self._compute_next_fire()
-        self._next_fire = next_fire
-        self._next_ramp_start = None
+    @callback
+    def async_recompute_schedule(
+        self, *, catch_up: bool = False, skip_today: bool = False
+    ) -> None:
+        """(Re)compute the next fire and (re)arm both independent timers.
 
-        if next_fire is not None:
-            length_min = int(self.read_number("length_min", DEFAULT_LENGTH_MIN))
-            ramp_start = next_fire - timedelta(minutes=length_min)
-            self._next_ramp_start = ramp_start
-            self._cancel_schedule = async_track_point_in_time(
-                self.hass, self._async_on_fire, ramp_start
-            )
+        catch_up   apply the restart grace window (startup only): if today's
+                   alarm was missed within CATCHUP_GRACE_MIN, fire it now.
+        skip_today exclude today's occurrence entirely — used by dismiss, which
+                   means "not this one", even when today's alarm is still ahead.
+        """
+        self._cancel_scheduled_timers()
+
+        decision = self._compute_schedule(
+            catch_up=catch_up, skip_today=skip_today
+        )
+        if decision is None:
+            self._next_fire = None
+            self._next_ramp_start = None
+            self._notify_listeners()
+            return
+
+        self._next_fire = decision.next_fire
+        self._next_ramp_start = decision.ramp_start
+
+        if decision.fire_now:
+            # HA was down past alarm_time but within grace: fire the alarm now.
+            # Music only — a partial ramp from a cold boot adds no value. The
+            # alarm callback rolls the schedule forward to the next day itself.
+            self.hass.async_create_task(self._async_on_alarm(dt_util.now()))
+        else:
+            now = dt_util.now()
+            if (
+                decision.ramp_start is not None
+                and decision.ramp_start > now
+            ):
+                self._cancel_ramp_schedule = async_track_point_in_time(
+                    self.hass, self._async_on_ramp_start, decision.ramp_start
+                )
+            if decision.next_fire is not None and decision.next_fire > now:
+                self._cancel_alarm_schedule = async_track_point_in_time(
+                    self.hass, self._async_on_alarm, decision.next_fire
+                )
 
         self._notify_listeners()
 
-    def _compute_next_fire(self) -> datetime | None:
+    def _compute_schedule(
+        self, *, catch_up: bool = False, skip_today: bool = False
+    ) -> ScheduleDecision | None:
         if not self._read_enabled():
             return None
         alarm_time = self._read_alarm_time()
@@ -255,65 +286,100 @@ class WakeAlarmCoordinator:
         enabled_days = self._read_enabled_days()
         if not enabled_days:
             return None
-        return compute_next_fire(dt_util.now(), alarm_time, enabled_days)
+        length_min = int(self.read_number("length_min", DEFAULT_LENGTH_MIN))
+        now = dt_util.now()
 
-    # -------------------- fire callback --------------------
+        if catch_up and not skip_today:
+            return plan_schedule(
+                now, alarm_time, enabled_days, length_min, CATCHUP_GRACE_MIN
+            )
 
-    async def _async_on_fire(self, _now: datetime) -> None:
-        """Fire at ramp_start. Per BRIEF.md "On fire":
+        # Normal arm / post-fire roll-forward / dismiss: the next strictly
+        # future occurrence, never catching up a missed alarm (catch-up only
+        # makes sense at startup). For skip_today we advance the anchor to
+        # today's alarm_time so compute_next_fire rolls past today even when
+        # called before it (dismiss during the ramp).
+        anchor = now
+        if skip_today:
+            today_at = now.replace(
+                hour=alarm_time.hour,
+                minute=alarm_time.minute,
+                second=alarm_time.second,
+                microsecond=0,
+            )
+            anchor = max(now, today_at)
+        future = compute_next_fire(anchor, alarm_time, enabled_days)
+        if future is None:
+            return None
+        ramp_start = future - timedelta(minutes=length_min)
+        return ScheduleDecision(
+            next_fire=future,
+            ramp_start=ramp_start,
+            fire_now=False,
+            inside_ramp_window=ramp_start <= now < future,
+        )
 
-        1. Master enable check
-        2. Person presence check (if configured)
-        3. Start the light ramp
-        4. Schedule music start at alarm_time
-        """
-        self._cancel_schedule = None
-        if not self._read_enabled():
-            self.async_recompute_schedule()
-            return
-
-        # Person presence check applies to the whole sequence (not just the
-        # pre-phase, unlike the legacy YAML).
+    def _presence_ok(self) -> bool:
+        """True when no person is configured, or the configured person is home."""
         person = self.entry.data.get(CONF_PERSON_ENTITY)
-        if person:
-            person_state = self.hass.states.get(person)
-            if person_state is None or person_state.state != "home":
+        if not person:
+            return True
+        st = self.hass.states.get(person)
+        return st is not None and st.state == "home"
+
+    # -------------------- fire callbacks --------------------
+
+    async def _async_on_ramp_start(self, _now: datetime) -> None:
+        """Light-ramp timer (lights only).
+
+        Never schedules music. An exception here is contained to the light
+        path; the independently armed alarm timer (_async_on_alarm) is
+        untouched and still fires. Presence is checked here for the lights;
+        the alarm re-checks it separately at alarm_time.
+        """
+        self._cancel_ramp_schedule = None
+        if not self._read_enabled():
+            return
+        if not self._presence_ok():
+            _LOGGER.info(
+                "light ramp for %s skipped: %s not home",
+                self.slug,
+                self.entry.data.get(CONF_PERSON_ENTITY),
+            )
+            return
+        await self._async_start_ramp(end_state=STATE_IDLE)
+
+    async def _async_on_alarm(self, _now: datetime) -> None:
+        """Authoritative wake-up timer, fired at alarm_time.
+
+        Independent of the light ramp: runs even if the ramp callback never
+        fired or raised. Presence is re-checked here (fresh, at alarm time) so
+        leaving/arriving between ramp_start and alarm_time is honoured for the
+        alarm itself. The schedule is always rolled forward in the finally —
+        at this point now >= alarm_time, so compute_next_fire picks the next
+        enabled day and the old mid-cycle re-selection loop cannot occur.
+        """
+        self._cancel_alarm_schedule = None
+        try:
+            if not self._read_enabled():
+                return
+            if not self._presence_ok():
                 _LOGGER.info(
                     "alarm for %s skipped: %s not home",
                     self.slug,
-                    person,
+                    self.entry.data.get(CONF_PERSON_ENTITY),
                 )
-                self.async_recompute_schedule()
                 return
+            await self._fire_music()
+        finally:
+            self.async_recompute_schedule()
 
-        # Capture alarm_time (== self._next_fire). The schedule won't be
-        # recomputed mid-cycle; it only recomputes after dismiss / completion.
-        alarm_time = self._next_fire
-        # Arm the "music-start pending" guard BEFORE the ramp can run, so a
-        # ramp that finishes before alarm_time (timing jitter, or no lights
-        # configured) does not prematurely return to IDLE and re-fire this
-        # same alarm. Cleared by _async_on_music_start / _cancel_pending_music_start.
-        self._music_start_pending = alarm_time is not None
-        await self._async_start_ramp(end_state=STATE_IDLE)
+    async def _fire_music(self) -> None:
+        """Decide between music, urgent (players down), or no-media notice.
 
-        if alarm_time is None:
-            return
-        if alarm_time > dt_util.now():
-            self._cancel_music_start = async_track_point_in_time(
-                self.hass, self._async_on_music_start, alarm_time
-            )
-        else:
-            # ramp_start was already in the past at fire time (mid-cycle
-            # restart) → fire music immediately.
-            self.hass.async_create_task(
-                self._async_on_music_start(dt_util.now())
-            )
-
-    async def _async_on_music_start(self, _now: datetime) -> None:
-        """Fired at alarm_time. Decide between music, urgent, or no-media."""
-        self._cancel_music_start = None
-        self._music_start_pending = False
-
+        Self-contained so a failure in the light path can never reach it. On
+        any no-music outcome, settle to IDLE if nothing else is running.
+        """
         players = list(
             self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []
         )
@@ -330,9 +396,7 @@ class WakeAlarmCoordinator:
                 unavailable,
             )
             await async_send_player_unavailable(self, unavailable)
-            # No music will play. If the ramp is still going it returns us to
-            # IDLE on completion; if it already finished, do it here.
-            self._ensure_idle_after_no_music()
+            self._settle_idle_if_not_active()
             return
 
         if self.current_media() is None:
@@ -341,24 +405,25 @@ class WakeAlarmCoordinator:
                 self.slug,
             )
             await async_send_no_media(self)
-            self._ensure_idle_after_no_music()
+            self._settle_idle_if_not_active()
             return
 
         await self._async_start_music(end_state=STATE_IDLE)
         await async_send_standard(self)
 
     @callback
-    def _ensure_idle_after_no_music(self) -> None:
-        """Return to IDLE when no music will play and the ramp has finished.
+    def _settle_idle_if_not_active(self) -> None:
+        """Drop to IDLE when no music will play and nothing is still running.
 
-        With the music-start guard, a ramp that ends before alarm_time leaves
-        the coordinator in RAMPING (waiting for music). When music is then
-        skipped (players unavailable / no media), nothing else would roll us
-        back to IDLE, so handle it here. If the ramp is still running, its own
-        completion handles the transition (the guard is already cleared).
+        A ramp that finished early leaves us in RAMPING; when music is then
+        skipped (players unavailable / no media) nothing else rolls us back, so
+        do it here. If a ramp or music task is still running, its own
+        completion handles the transition.
         """
-        if self._state == STATE_RAMPING and (
-            self._ramp_task is None or self._ramp_task.done()
+        if (
+            self._state in (STATE_RAMPING, STATE_PLAYING)
+            and (self._ramp_task is None or self._ramp_task.done())
+            and (self._music_task is None or self._music_task.done())
         ):
             self._set_state(STATE_IDLE)
 
@@ -403,13 +468,11 @@ class WakeAlarmCoordinator:
         finally:
             self._ramp_task = None
             self._ramp_cancel_event = None
-            # Only revert to IDLE here; later steps will decide whether to
-            # transition to PLAYING based on whether music is starting. If a
-            # music-start is still pending for this fire, the sequence isn't
-            # over — leave the state alone so we don't recompute the schedule
-            # onto (and re-fire) this same alarm. _async_on_music_start drives
-            # the next transition once it runs.
-            if self._state == STATE_RAMPING and not self._music_start_pending:
+            # Revert to IDLE if the ramp ended while still RAMPING. This is
+            # harmless now: IDLE no longer recomputes the schedule, and the
+            # music timer is armed independently, so a ramp finishing a few
+            # seconds before alarm_time can't re-fire the alarm.
+            if self._state == STATE_RAMPING:
                 self._set_state(end_state)
 
     # -------------------- music sequence --------------------
@@ -505,7 +568,6 @@ class WakeAlarmCoordinator:
                 self._music_cancel_event.set()
 
         self._cancel_auto_dismiss()
-        self._cancel_pending_music_start()
         self._set_state(STATE_SNOOZING)
 
         snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
@@ -531,7 +593,8 @@ class WakeAlarmCoordinator:
 
         Stops music on all configured players, unjoins any formed group,
         cancels every pending task/timer, leaves lights as the user has
-        them, returns to IDLE, and recomputes the next fire time.
+        them, returns to IDLE, and rolls the schedule forward past today's
+        occurrence (dismiss means "skip this one").
         """
         if self._state == STATE_IDLE:
             _LOGGER.debug("dismiss for %s: already idle", self.slug)
@@ -559,20 +622,15 @@ class WakeAlarmCoordinator:
             self._ramp_cancel_event.set()
         if self._music_cancel_event is not None:
             self._music_cancel_event.set()
+        self._cancel_scheduled_timers()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
-        self._cancel_pending_music_start()
 
-        # _set_state(STATE_IDLE) now handles the schedule recompute and
-        # auto-dismiss deadline clear, so we don't need explicit calls.
         self._set_state(STATE_IDLE)
-
-    @callback
-    def _cancel_pending_music_start(self) -> None:
-        self._music_start_pending = False
-        if self._cancel_music_start is not None:
-            self._cancel_music_start()
-            self._cancel_music_start = None
+        # IDLE no longer recomputes, so roll forward explicitly. skip_today
+        # excludes today's occurrence even if dismiss happened during the ramp
+        # (before alarm_time) — otherwise we'd re-select and re-fire today.
+        self.async_recompute_schedule(skip_today=True)
 
     @callback
     def _cancel_snooze(self) -> None:
@@ -766,13 +824,13 @@ class WakeAlarmCoordinator:
             return
         self._state = new_state
         if new_state == STATE_IDLE:
-            # Always roll sensor.<slug>_next_alarm forward when we go idle —
-            # whether IDLE is reached via dismiss, ramp completion, music
-            # completion, or an aborted on-fire path. Previously this only
-            # happened on dismiss, so naturally-completed alarms left the
-            # sensor pointing at the just-past fire time.
+            # Clear the auto-dismiss deadline so the next fire starts fresh.
+            # We intentionally do NOT recompute the schedule here: rolling the
+            # next-fire forward happens at well-defined moments (the alarm
+            # firing, dependency changes, dismiss, startup), never on the
+            # IDLE transition. Recomputing here is what caused the ramp to
+            # re-fire when it finished a few seconds before alarm_time.
             self._clear_auto_dismiss_deadline()
-            self.async_recompute_schedule()
         self._notify_listeners()
 
     # -------------------- state readers --------------------
