@@ -9,6 +9,7 @@
           "light_entities": "Lights (optional)",
           "media_player_entities": "Media players (optional)",
           "person_entity": "Presence (optional)",
+          "condition_entity": "Condition sensor (optional)",
           "notify_target_standard": "Standard notification target (optional)",
           "notify_target_urgent": "Urgent notification target (optional)"
         },
@@ -16,6 +17,7 @@
           "name": "Friendly name for this alarm — used as a prefix for every entity ID. Cannot be changed after setup.",
           "light_entities": "Lights that ramp from warm + dim to cool + bright before the alarm time. Optional — leave blank for a music-only alarm.",
           "media_player_entities": "Speakers to play music on at alarm time. Optional — leave blank for a lights-only sunrise alarm. To pick more than one, they must all come from the same integration AND support synchronised group playback (e.g. multiple Sonos speakers). At least one light or media player is required.",
+          "condition_entity": "If set, the alarm fires only while this binary sensor is on — e.g. a bed sensor (only when you're in bed) or Home Assistant's Workday sensor (skip bank holidays). Checked alongside presence; both must pass.",
           "person_entity": "If set, the alarm fires only when this person is home. Leave blank to fire regardless.",
           "notify_target_standard": "Mobile notification at alarm time, with Snooze and Dismiss buttons. Leave blank for no notification.",
           "notify_target_urgent": "Critical notification when speakers are unavailable or no media has been picked. Set to a different channel for a distinct sound."
@@ -43,6 +45,7 @@
           "light_entities": "Lights (optional)",
           "media_player_entities": "Media players (optional)",
           "person_entity": "Presence (optional)",
+          "condition_entity": "Condition sensor (optional)",
           "notify_target_standard": "Standard notification target (optional)",
           "notify_target_urgent": "Urgent notification target (optional)"
         },
@@ -50,6 +53,7 @@
           "light_entities": "Lights that ramp before the alarm time. Leave blank for a music-only alarm.",
           "media_player_entities": "Speakers for music. Leave blank for a lights-only alarm. Multi-select requires the same integration AND group-playback support. At least one light or media player is required.",
           "person_entity": "Skip the alarm when this person isn't home. Leave blank to fire regardless.",
+          "condition_entity": "Skip the alarm unless this binary sensor is on (e.g. a bed sensor or the Workday sensor). ANDed with presence; leave blank to ignore.",
           "notify_target_standard": "Mobile notification at alarm time.",
           "notify_target_urgent": "Mobile notification when speakers are unavailable or no media has been picked."
         }

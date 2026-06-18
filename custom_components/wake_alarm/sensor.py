@@ -18,6 +18,7 @@ from .const import (
     ATTR_MEDIA_CONTENT_ID,
     ATTR_MEDIA_CONTENT_TYPE,
     ATTR_MEDIA_THUMBNAIL,
+    CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_PERSON_ENTITY,
@@ -103,6 +104,7 @@ class WakeAlarmNextAlarmSensor(_CoordinatorSensor):
                 data.get(CONF_MEDIA_PLAYER_ENTITIES, []) or []
             ),
             "person_entity": data.get(CONF_PERSON_ENTITY),
+            "condition_entity": data.get(CONF_CONDITION_ENTITY),
         }
 
 

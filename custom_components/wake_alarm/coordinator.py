@@ -38,6 +38,7 @@ from homeassistant.util import dt as dt_util
 from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .const import (
     CATCHUP_GRACE_MIN,
+    CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_PERSON_ENTITY,
@@ -328,6 +329,39 @@ class WakeAlarmCoordinator:
         st = self.hass.states.get(person)
         return st is not None and st.state == "home"
 
+    def _condition_ok(self) -> bool:
+        """True when no condition entity is configured, or it is currently on.
+
+        The optional binary_sensor gate (#23): works exactly like presence but
+        accepts any on/off sensor (bed sensor, workday sensor, etc.). ANDed
+        with presence — both must pass for the alarm to run.
+        """
+        entity = self.entry.data.get(CONF_CONDITION_ENTITY)
+        if not entity:
+            return True
+        st = self.hass.states.get(entity)
+        return st is not None and st.state == "on"
+
+    def _gate_ok(self, *, what: str) -> bool:
+        """Combined presence + condition gate, with a logged reason on skip."""
+        if not self._presence_ok():
+            _LOGGER.info(
+                "%s for %s skipped: %s not home",
+                what,
+                self.slug,
+                self.entry.data.get(CONF_PERSON_ENTITY),
+            )
+            return False
+        if not self._condition_ok():
+            _LOGGER.info(
+                "%s for %s skipped: condition %s not on",
+                what,
+                self.slug,
+                self.entry.data.get(CONF_CONDITION_ENTITY),
+            )
+            return False
+        return True
+
     # -------------------- fire callbacks --------------------
 
     async def _async_on_ramp_start(self, _now: datetime) -> None:
@@ -341,12 +375,7 @@ class WakeAlarmCoordinator:
         self._cancel_ramp_schedule = None
         if not self._read_enabled():
             return
-        if not self._presence_ok():
-            _LOGGER.info(
-                "light ramp for %s skipped: %s not home",
-                self.slug,
-                self.entry.data.get(CONF_PERSON_ENTITY),
-            )
+        if not self._gate_ok(what="light ramp"):
             return
         await self._async_start_ramp(end_state=STATE_IDLE)
 
@@ -364,12 +393,7 @@ class WakeAlarmCoordinator:
         try:
             if not self._read_enabled():
                 return
-            if not self._presence_ok():
-                _LOGGER.info(
-                    "alarm for %s skipped: %s not home",
-                    self.slug,
-                    self.entry.data.get(CONF_PERSON_ENTITY),
-                )
+            if not self._gate_ok(what="alarm"):
                 return
             await self._fire_music()
         finally:

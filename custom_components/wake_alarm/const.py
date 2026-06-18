@@ -19,6 +19,7 @@ CONF_SLUG = "slug"
 CONF_LIGHT_ENTITIES = "light_entities"
 CONF_MEDIA_PLAYER_ENTITIES = "media_player_entities"
 CONF_PERSON_ENTITY = "person_entity"
+CONF_CONDITION_ENTITY = "condition_entity"
 CONF_NOTIFY_TARGET_STANDARD = "notify_target_standard"
 CONF_NOTIFY_TARGET_URGENT = "notify_target_urgent"
 

@@ -23,6 +23,7 @@ from homeassistant.helpers import selector
 from homeassistant.util import slugify
 
 from .const import (
+    CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_NOTIFY_TARGET_STANDARD,
@@ -135,6 +136,17 @@ def _build_schema(
         selector.EntitySelectorConfig(domain="person")
     )
 
+    fields[
+        vol.Optional(
+            CONF_CONDITION_ENTITY,
+            description={
+                "suggested_value": defaults.get(CONF_CONDITION_ENTITY, "")
+            },
+        )
+    ] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="binary_sensor")
+    )
+
     notify = _notify_select(hass)
     fields[
         vol.Optional(
@@ -205,6 +217,10 @@ def _validate_input(
     if person:
         data[CONF_PERSON_ENTITY] = person
 
+    condition = user_input.get(CONF_CONDITION_ENTITY)
+    if condition:
+        data[CONF_CONDITION_ENTITY] = condition
+
     for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
         v = (user_input.get(k) or "").strip()
         if v:
@@ -216,7 +232,7 @@ def _validate_input(
 class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-screen create flow."""
 
-    VERSION = 2
+    VERSION = 3
 
     @staticmethod
     @callback
@@ -274,6 +290,7 @@ class WakeAlarmOptionsFlow(OptionsFlow):
                 # Drop optional fields that were cleared in this submit.
                 for k in (
                     CONF_PERSON_ENTITY,
+                    CONF_CONDITION_ENTITY,
                     CONF_NOTIFY_TARGET_STANDARD,
                     CONF_NOTIFY_TARGET_URGENT,
                 ):

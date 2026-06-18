@@ -80,8 +80,12 @@ async def async_migrate_entry(
     Both unique_id and entity_id are updated in the entity registry; on/off
     state may reset to the default_on value (Mon-Fri on, Sat/Sun off) since
     RestoreEntity is keyed by entity_id and we are renaming it.
+
+    v2 → v3: added the optional binary_sensor condition gate (#23). Additive
+    optional field — absence of the key means no condition — so no stored-data
+    transformation is needed; this step only advances the version.
     """
-    if entry.version > 2:
+    if entry.version > 3:
         _LOGGER.error(
             "wake_alarm config entry %s is at version %s, cannot downgrade",
             entry.title,
@@ -114,6 +118,9 @@ async def async_migrate_entry(
                 "wake_alarm migration v1→v2: %s → %s", entity_id, new_entity_id
             )
         hass.config_entries.async_update_entry(entry, version=2)
+
+    if entry.version == 2:
+        hass.config_entries.async_update_entry(entry, version=3)
 
     return True
 

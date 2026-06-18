@@ -259,6 +259,80 @@ async def test_presence_home_at_ramp_away_at_alarm(env, freezer) -> None:
 
 
 # --------------------------------------------------------------------------
+# condition sensor gate (binary_sensor) — #23
+# --------------------------------------------------------------------------
+
+
+async def test_condition_off_skips_ramp_and_music(env, freezer) -> None:
+    """Condition sensor off → neither the ramp nor the music run."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 0
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    # Schedule still rolls forward even though the alarm was gated off.
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_condition_on_allows_alarm(env, freezer) -> None:
+    """Condition sensor on → the alarm runs normally."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "on")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_condition_on_at_ramp_off_at_alarm(env, freezer) -> None:
+    """Checked twice: on at ramp-start (lights run), off by alarm (music gated)."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "on")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    await env.hass.async_block_till_done()
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_presence_and_condition_are_anded(env, freezer) -> None:
+    """Person home but condition off → still gated (presence AND condition)."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("person.me", "home")
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    entry = env.make_entry(
+        person_entity="person.me", condition_entity="binary_sensor.bed"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 0
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.next_fire == NEXT_WEEK
+
+
+# --------------------------------------------------------------------------
 # restart catch-up (computed at async_setup time)
 # --------------------------------------------------------------------------
 
