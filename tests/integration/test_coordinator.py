@@ -571,6 +571,52 @@ async def test_scripts_run_for_lights_only_alarm(env, freezer) -> None:
     assert len(after) == 1
 
 
+async def test_master_disable_in_idle_gap_does_not_strand_cycle(
+    env, freezer
+) -> None:
+    """#34 regression: disabling the master switch during the ramp→alarm gap
+    must not strand _cycle_active, or the next occurrence's before-script is
+    skipped.
+    """
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before", after_script="script.after"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    # Ramp fires at 06:45 and completes; cycle is now open across the idle gap.
+    await fire(env.hass, freezer, at(6, 45))
+    assert len(before) == 1
+    assert coord.state == STATE_IDLE
+    assert coord._cycle_active is True
+
+    # User disables the master switch during the gap (before alarm_time).
+    env.hass.states.async_set("switch.test_enabled", "off")
+    await env.hass.async_block_till_done()
+    # The cycle is closed out without firing the after-script (the alarm never
+    # fired), and the alarm timer is cancelled.
+    assert coord._cycle_active is False
+    assert len(after) == 0
+    assert coord.next_fire is None
+
+    # Nothing fires at the old alarm time.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+
+    # Re-enable for the next occurrence; its before-script must fire again.
+    env.hass.states.async_set("switch.test_enabled", "on")
+    await env.hass.async_block_till_done()
+    assert coord.next_fire == NEXT_WEEK
+
+    nxt_ramp = at(6, 45) + timedelta(days=7)
+    await fire(env.hass, freezer, nxt_ramp)
+    await env.hass.async_block_till_done()
+    assert len(before) == 2  # not stranded — before fires for the new occurrence
+
+
 async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
     """Home at ramp (before runs); away by alarm → after skipped, cycle reset."""
     freezer.move_to(at(5, 0))

@@ -255,6 +255,12 @@ class WakeAlarmCoordinator:
             catch_up=catch_up, skip_today=skip_today
         )
         if decision is None:
+            # No schedule (disabled / no enabled days / no alarm time) cancels
+            # the armed alarm timer above, so _async_on_alarm — which would
+            # otherwise close the occurrence — will never run. End any pending
+            # occurrence here so _cycle_active can't get stranded True and
+            # suppress the next occurrence's before-script (#34).
+            self._abandon_cycle()
             self._next_fire = None
             self._next_ramp_start = None
             self._notify_listeners()
