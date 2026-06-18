@@ -142,8 +142,8 @@ async def _run_single_player(
         return
 
     for player in players:
-        await coordinator.hass.services.async_call(
-            "media_player",
+        await _safe_call(
+            coordinator,
             "play_media",
             {
                 "entity_id": player,
@@ -177,8 +177,8 @@ async def _run_multi_player_sonos(
 
     if not from_snooze:
         # 1. unjoin coordinator (clears any pre-existing group state)
-        await coordinator.hass.services.async_call(
-            "media_player",
+        await _safe_call(
+            coordinator,
             "unjoin",
             {"entity_id": group_coord},
             blocking=True,
@@ -192,8 +192,8 @@ async def _run_multi_player_sonos(
 
         # 4. join the rest
         if members:
-            await coordinator.hass.services.async_call(
-                "media_player",
+            await _safe_call(
+                coordinator,
                 "join",
                 {"entity_id": group_coord, "group_members": members},
                 blocking=True,
@@ -206,16 +206,16 @@ async def _run_multi_player_sonos(
     await asyncio.gather(*(_volume_set(coordinator, p, 0.0) for p in players))
 
     # 7. shuffle on (mirrors legacy YAML)
-    await coordinator.hass.services.async_call(
-        "media_player",
+    await _safe_call(
+        coordinator,
         "shuffle_set",
         {"entity_id": group_coord, "shuffle": True},
         blocking=True,
     )
 
     # 8. play_media on coordinator
-    await coordinator.hass.services.async_call(
-        "media_player",
+    await _safe_call(
+        coordinator,
         "play_media",
         {
             "entity_id": group_coord,
@@ -282,8 +282,8 @@ async def _random_skip(
     for _ in range(skips):
         if cancel_event.is_set():
             return
-        await coordinator.hass.services.async_call(
-            "media_player",
+        await _safe_call(
+            coordinator,
             "media_next_track",
             {"entity_id": group_coord},
             blocking=False,
@@ -292,11 +292,41 @@ async def _random_skip(
             return
 
 
+async def _safe_call(
+    coordinator: "WakeAlarmCoordinator",
+    service: str,
+    data: dict,
+    *,
+    blocking: bool,
+) -> None:
+    """media_player service call that logs and swallows failures.
+
+    A single player going unavailable mid-sequence (raising on e.g. volume_set
+    or join) must not abort the whole sequence or strand a half-formed group
+    (#45). The coordinator's pre-flight availability check (_fire_music) handles
+    the all-players-down case and the urgent notification; this keeps a
+    transient single-player drop from taking the rest of the alarm down with it.
+    """
+    try:
+        await coordinator.hass.services.async_call(
+            "media_player", service, data, blocking=blocking
+        )
+    except Exception:  # noqa: BLE001
+        _LOGGER.warning(
+            "music sequence for %s: media_player.%s failed for %s "
+            "(continuing)",
+            coordinator.slug,
+            service,
+            data.get("entity_id"),
+            exc_info=True,
+        )
+
+
 async def _volume_set(
     coordinator: "WakeAlarmCoordinator", entity_id: str, volume: float
 ) -> None:
-    await coordinator.hass.services.async_call(
-        "media_player",
+    await _safe_call(
+        coordinator,
         "volume_set",
         {"entity_id": entity_id, "volume_level": volume},
         blocking=True,
