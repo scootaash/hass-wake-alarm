@@ -17,8 +17,15 @@ integrations — should work everywhere HA supports the underlying
 2. HACS → Wake Alarm → Download.
 3. Restart Home Assistant.
 4. Settings → Devices & Services → Add Integration → search "Wake Alarm".
-5. Set up the instance with the wizard to select which media player and lights are used. If desired add notification and presence
+5. Set up the instance with the wizard. Lights and media players are both optional — pick at least one. Add a notification target, a presence/condition gate, or before/after scripts if desired.
 6. Add the card and select a playlist. Adjust other settings if desired
+
+Lights and media players are independent: configure **only lights** for a
+silent sunrise alarm, or **only media players** for a music-only alarm.
+At least one of the two is required. With no media player, the alarm runs
+the light ramp and sends the standard notification at alarm time (the
+"speaker unavailable" / "no media" urgent notices are suppressed), then
+settles — snooze and auto-dismiss are music-only and aren't armed.
 
 The card ships **inside the integration** and registers itself as a
 Lovelace resource at `/wake_alarm/wake-alarm-card.js`. There's no
@@ -102,6 +109,33 @@ would begin but back home by the alarm time, the music still wakes you
 — and if you leave in between, the lights may ramp but no music plays.
 No notification is sent when a phase is skipped. Useful for "alarm only
 if I'm in the house" — leave it blank to skip the check entirely.
+
+### Condition sensor
+
+Set the optional **Condition sensor** (any `binary_sensor`) to gate the
+cycle on an on/off state — for example a bed sensor (only sound the alarm
+when you're actually in bed) or Home Assistant's built-in **Workday**
+sensor (skip bank holidays and non-working days automatically). It works
+exactly like presence: checked twice, at ramp start and again at
+`alarm_time`, and must be `on` for that phase to run. When both a presence
+entity and a condition sensor are set they are **ANDed** — both have to
+pass. Leave it blank to skip the check.
+
+### Run a script before / after
+
+Two optional **script** hooks let you run your own automation around the
+alarm without baking it into the integration — a TTS greeting, a coffee
+machine, blinds, etc.
+
+- **Before** runs when the cycle begins: at ramp start, or at `alarm_time`
+  when there's no light ramp. It does not run if the alarm is gated off by
+  presence/condition.
+- **After** runs when the cycle ends: music finishing on its own, a
+  dismiss, or an auto-dismiss. It does **not** run on snooze.
+
+Both fire non-blocking, so a slow or failing script can never delay the
+wake-up, and both receive the instance `slug` and `name` as script
+variables for context.
 
 ### Snooze and Dismiss
 
@@ -206,7 +240,8 @@ Press via `button.press` service or tap in the UI:
 ### Status
 
 - `sensor.my_alarm_next_alarm` — timestamp of the next scheduled fire.
-  Attributes: `light_entities`, `media_player_entities`, `person_entity`.
+  Attributes: `light_entities`, `media_player_entities`, `person_entity`,
+  `condition_entity`.
 - `sensor.my_alarm_state` — enum: `idle` / `ramping` / `playing` / `snoozing`.
   When `snoozing`, attribute `snooze_until` is the ISO timestamp the
   music will resume.

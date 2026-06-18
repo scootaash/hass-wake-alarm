@@ -23,6 +23,9 @@ from homeassistant.helpers import selector
 from homeassistant.util import slugify
 
 from .const import (
+    CONF_AFTER_SCRIPT,
+    CONF_BEFORE_SCRIPT,
+    CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
     CONF_NOTIFY_TARGET_STANDARD,
@@ -107,7 +110,7 @@ def _build_schema(
         ] = str
 
     fields[
-        vol.Required(
+        vol.Optional(
             CONF_LIGHT_ENTITIES,
             default=defaults.get(CONF_LIGHT_ENTITIES, []),
         )
@@ -116,7 +119,7 @@ def _build_schema(
     )
 
     fields[
-        vol.Required(
+        vol.Optional(
             CONF_MEDIA_PLAYER_ENTITIES,
             default=defaults.get(CONF_MEDIA_PLAYER_ENTITIES, []),
         )
@@ -133,6 +136,17 @@ def _build_schema(
         )
     ] = selector.EntitySelector(
         selector.EntitySelectorConfig(domain="person")
+    )
+
+    fields[
+        vol.Optional(
+            CONF_CONDITION_ENTITY,
+            description={
+                "suggested_value": defaults.get(CONF_CONDITION_ENTITY, "")
+            },
+        )
+    ] = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="binary_sensor")
     )
 
     notify = _notify_select(hass)
@@ -155,6 +169,16 @@ def _build_schema(
             },
         )
     ] = notify
+
+    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+        fields[
+            vol.Optional(
+                key,
+                description={"suggested_value": defaults.get(key, "")},
+            )
+        ] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="script")
+        )
 
     return vol.Schema(fields)
 
@@ -183,26 +207,36 @@ def _validate_input(
             data[CONF_NAME] = name
             data[CONF_SLUG] = slug
 
-    lights = user_input.get(CONF_LIGHT_ENTITIES) or []
-    if not lights:
-        errors[CONF_LIGHT_ENTITIES] = "required"
-    else:
-        data[CONF_LIGHT_ENTITIES] = list(lights)
+    # Lights and media players are both individually optional, but an alarm
+    # that does nothing makes no sense, so require at least one of the two
+    # (#22 — lights-only or music-only are both valid).
+    lights = list(user_input.get(CONF_LIGHT_ENTITIES) or [])
+    players = list(user_input.get(CONF_MEDIA_PLAYER_ENTITIES) or [])
 
-    players = user_input.get(CONF_MEDIA_PLAYER_ENTITIES) or []
-    if not players:
-        errors[CONF_MEDIA_PLAYER_ENTITIES] = "required"
+    if not lights and not players:
+        errors[CONF_LIGHT_ENTITIES] = "need_light_or_media"
+        errors[CONF_MEDIA_PLAYER_ENTITIES] = "need_light_or_media"
     else:
-        player_errors, ph = _validate_players(hass, players)
-        if player_errors:
-            errors.update(player_errors)
-            placeholders.update(ph)
-        else:
-            data[CONF_MEDIA_PLAYER_ENTITIES] = list(players)
+        data[CONF_LIGHT_ENTITIES] = lights
+        data[CONF_MEDIA_PLAYER_ENTITIES] = players
+        if players:
+            player_errors, ph = _validate_players(hass, players)
+            if player_errors:
+                errors.update(player_errors)
+                placeholders.update(ph)
 
     person = user_input.get(CONF_PERSON_ENTITY)
     if person:
         data[CONF_PERSON_ENTITY] = person
+
+    condition = user_input.get(CONF_CONDITION_ENTITY)
+    if condition:
+        data[CONF_CONDITION_ENTITY] = condition
+
+    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+        script = user_input.get(key)
+        if script:
+            data[key] = script
 
     for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
         v = (user_input.get(k) or "").strip()
@@ -215,7 +249,7 @@ def _validate_input(
 class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-screen create flow."""
 
-    VERSION = 2
+    VERSION = 4
 
     @staticmethod
     @callback
@@ -273,6 +307,9 @@ class WakeAlarmOptionsFlow(OptionsFlow):
                 # Drop optional fields that were cleared in this submit.
                 for k in (
                     CONF_PERSON_ENTITY,
+                    CONF_CONDITION_ENTITY,
+                    CONF_BEFORE_SCRIPT,
+                    CONF_AFTER_SCRIPT,
                     CONF_NOTIFY_TARGET_STANDARD,
                     CONF_NOTIFY_TARGET_URGENT,
                 ):

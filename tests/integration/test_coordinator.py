@@ -14,7 +14,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import (
+    async_fire_time_changed,
+    async_mock_service,
+)
 
 from custom_components.wake_alarm.const import (
     STATE_IDLE,
@@ -169,6 +172,54 @@ async def test_zero_length_ramp_and_alarm_coincide(env, freezer) -> None:
 
 
 # --------------------------------------------------------------------------
+# lights-only alarm (no media player configured) — #22
+# --------------------------------------------------------------------------
+
+
+async def test_lights_only_alarm_runs_ramp_no_music(env, freezer) -> None:
+    """No media player → ramp runs, no music, friendly standard notice only."""
+    freezer.move_to(at(5, 0))
+    entry = env.make_entry(media_player_entities=[])
+    coord = await env.build(entry, days=SAT)
+
+    # The ramp still runs on its own timer.
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    # At alarm time: no music, the standard notification fires, and neither
+    # urgent notice (players-unavailable / no-media) is sent.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert env.send_standard.await_count == 1
+    assert env.send_player_unavailable.await_count == 0
+    assert env.send_no_media.await_count == 0
+    assert coord.state == STATE_IDLE
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_lights_only_snooze_during_ramp_settles_idle(env, freezer) -> None:
+    """Snoozing a lights-only ramp has nothing to resume → settles to idle."""
+    freezer.move_to(at(5, 0))
+    entry = env.make_entry(media_player_entities=[])
+    coord = await env.build(entry, days=SAT, snooze_min=4)
+
+    env.ramp.block()
+    await fire_until_started(env.hass, freezer, at(6, 45), env.ramp)
+    assert coord.state == STATE_RAMPING
+
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # Snooze fires: no media players, so nothing resumes — must not hang.
+    await fire(env.hass, freezer, at(6, 49))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.state == STATE_IDLE
+
+
+# --------------------------------------------------------------------------
 # presence (checked independently at ramp_start and alarm_time)
 # --------------------------------------------------------------------------
 
@@ -207,6 +258,80 @@ async def test_presence_home_at_ramp_away_at_alarm(env, freezer) -> None:
     await env.hass.async_block_till_done()
     assert env.music.calls == 0
     # Schedule still rolls forward even though the alarm was skipped.
+    assert coord.next_fire == NEXT_WEEK
+
+
+# --------------------------------------------------------------------------
+# condition sensor gate (binary_sensor) — #23
+# --------------------------------------------------------------------------
+
+
+async def test_condition_off_skips_ramp_and_music(env, freezer) -> None:
+    """Condition sensor off → neither the ramp nor the music run."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 0
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    # Schedule still rolls forward even though the alarm was gated off.
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_condition_on_allows_alarm(env, freezer) -> None:
+    """Condition sensor on → the alarm runs normally."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "on")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_condition_on_at_ramp_off_at_alarm(env, freezer) -> None:
+    """Checked twice: on at ramp-start (lights run), off by alarm (music gated)."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("binary_sensor.bed", "on")
+    entry = env.make_entry(condition_entity="binary_sensor.bed")
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 1
+
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    await env.hass.async_block_till_done()
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_presence_and_condition_are_anded(env, freezer) -> None:
+    """Person home but condition off → still gated (presence AND condition)."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("person.me", "home")
+    env.hass.states.async_set("binary_sensor.bed", "off")
+    entry = env.make_entry(
+        person_entity="person.me", condition_entity="binary_sensor.bed"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert env.ramp.calls == 0
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
     assert coord.next_fire == NEXT_WEEK
 
 
@@ -366,6 +491,109 @@ async def test_no_media_selected_sends_notice_and_settles(
     assert env.send_no_media.await_count == 1
     assert env.music.calls == 0
     assert coord.state == STATE_IDLE
+
+
+# --------------------------------------------------------------------------
+# before/after script hooks — #24
+# --------------------------------------------------------------------------
+
+
+async def test_before_at_ramp_after_on_music_end(env, freezer) -> None:
+    """Before fires at ramp-start; after fires when music finishes naturally."""
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before", after_script="script.after"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    await env.hass.async_block_till_done()
+    assert len(before) == 1
+    # Context variables are passed through to the script.
+    assert before[0].data.get("slug") == "test"
+    assert before[0].data.get("name") == "Test Alarm"
+    assert len(after) == 0  # cycle still in progress
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+    assert len(after) == 1
+    assert len(before) == 1  # before fires once per occurrence
+    assert coord.state == STATE_IDLE
+
+
+async def test_after_script_on_dismiss_not_snooze(env, freezer) -> None:
+    """Snooze keeps the cycle open (no after); dismiss closes it (after once)."""
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before", after_script="script.after"
+    )
+    coord = await env.build(entry, days=SAT, snooze_min=4)
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert coord.state == STATE_PLAYING
+    assert len(before) == 1
+
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+    assert len(after) == 0  # snooze must not fire the after-script
+
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    assert len(after) == 1
+
+
+async def test_scripts_run_for_lights_only_alarm(env, freezer) -> None:
+    """Lights-only (#22) still runs both hooks: before at ramp, after at fire."""
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        media_player_entities=[],
+        before_script="script.before",
+        after_script="script.after",
+    )
+    await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert len(before) == 1
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert len(after) == 1
+
+
+async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
+    """Home at ramp (before runs); away by alarm → after skipped, cycle reset."""
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    after = async_mock_service(env.hass, "script", "after")
+    env.hass.states.async_set("person.me", "home")
+    entry = env.make_entry(
+        person_entity="person.me",
+        before_script="script.before",
+        after_script="script.after",
+    )
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert len(before) == 1
+
+    env.hass.states.async_set("person.me", "not_home")
+    await env.hass.async_block_till_done()
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert len(after) == 0  # alarm gated → after not appropriate
+    assert coord._cycle_active is False  # but the cycle is reset for next time
 
 
 # --------------------------------------------------------------------------
