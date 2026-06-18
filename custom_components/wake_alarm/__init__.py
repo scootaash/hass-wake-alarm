@@ -62,6 +62,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data = hass.data.get(DOMAIN, {})
         if not any(not k.startswith("_") for k in domain_data):
             async_unload_services(hass)
+        # The card static path + extra_js_url and the _card_registered flag are
+        # deliberately left registered for the lifetime of the HA process:
+        # HA's http stack has no clean per-path unregister, the resource is
+        # domain-global (shared by all entries), and the flag keeps a later
+        # re-add from registering a duplicate route (#19/#37). A full HA restart
+        # clears and re-registers it cleanly.
     return unload_ok
 
 
@@ -156,21 +162,26 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(_CARD_REGISTERED_KEY):
         return
-    if not _CARD_PATH.is_file():
-        _LOGGER.warning(
-            "card bundle missing at %s; skipping resource registration",
-            _CARD_PATH,
-        )
-        return
 
     # Claim the flag before the first await. HA sets up multiple config entries
     # of a domain concurrently; if we only set this after awaiting the static
     # path registration, two entries both pass the guard above and the second
     # raises "method GET is already registered" (#19). Setting it here is
     # event-loop-atomic (no await between the guard check and this line). Roll
-    # back on failure so a later retry can still register.
+    # back on any failure (or a missing bundle) so a later retry can register.
     domain_data[_CARD_REGISTERED_KEY] = True
     try:
+        # is_file() is a stat() — run it off the event loop rather than blocking
+        # it (same class of issue as the #20 manifest open(); #37). Must come
+        # after the flag claim above to keep that claim await-free (#19).
+        if not await hass.async_add_executor_job(_CARD_PATH.is_file):
+            _LOGGER.warning(
+                "card bundle missing at %s; skipping resource registration",
+                _CARD_PATH,
+            )
+            domain_data[_CARD_REGISTERED_KEY] = False
+            return
+
         # Modern API (HA 2024.7+) takes a list of StaticPathConfig objects;
         # older versions had register_static_path. Use whichever is available.
         if hasattr(hass.http, "async_register_static_paths"):

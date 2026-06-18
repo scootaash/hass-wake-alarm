@@ -1,7 +1,7 @@
 {
   "domain": "wake_alarm",
   "name": "Wake Alarm",
-  "after_dependencies": ["http", "mobile_app"],
+  "after_dependencies": ["frontend", "http", "mobile_app"],
   "codeowners": ["@scootaash"],
   "config_flow": true,
   "dependencies": [],
