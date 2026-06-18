@@ -84,8 +84,11 @@ async def async_migrate_entry(
     v2 → v3: added the optional binary_sensor condition gate (#23). Additive
     optional field — absence of the key means no condition — so no stored-data
     transformation is needed; this step only advances the version.
+
+    v3 → v4: added the optional before/after script hooks (#24). Additive
+    optional fields; this step only advances the version.
     """
-    if entry.version > 3:
+    if entry.version > 4:
         _LOGGER.error(
             "wake_alarm config entry %s is at version %s, cannot downgrade",
             entry.title,
@@ -121,6 +124,9 @@ async def async_migrate_entry(
 
     if entry.version == 2:
         hass.config_entries.async_update_entry(entry, version=3)
+
+    if entry.version == 3:
+        hass.config_entries.async_update_entry(entry, version=4)
 
     return True
 

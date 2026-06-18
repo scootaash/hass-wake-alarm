@@ -38,6 +38,8 @@ from homeassistant.util import dt as dt_util
 from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .const import (
     CATCHUP_GRACE_MIN,
+    CONF_AFTER_SCRIPT,
+    CONF_BEFORE_SCRIPT,
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
@@ -112,6 +114,11 @@ class WakeAlarmCoordinator:
         # always elapses N minutes after the alarm originally fired —
         # never extended by repeat snoozes.
         self._auto_dismiss_deadline: datetime | None = None
+
+        # Whether an alarm occurrence is currently in progress. Delimits the
+        # before-script (run once when the occurrence begins, at ramp-start or
+        # alarm time) and the after-script (run once when it ends). See #24.
+        self._cycle_active: bool = False
 
     # -------------------- public state --------------------
 
@@ -377,6 +384,7 @@ class WakeAlarmCoordinator:
             return
         if not self._gate_ok(what="light ramp"):
             return
+        self._start_cycle()
         await self._async_start_ramp(end_state=STATE_IDLE)
 
     async def _async_on_alarm(self, _now: datetime) -> None:
@@ -392,9 +400,12 @@ class WakeAlarmCoordinator:
         self._cancel_alarm_schedule = None
         try:
             if not self._read_enabled():
+                self._abandon_cycle()
                 return
             if not self._gate_ok(what="alarm"):
+                self._abandon_cycle()
                 return
+            self._start_cycle()
             await self._fire_music()
         finally:
             self.async_recompute_schedule()
@@ -417,6 +428,7 @@ class WakeAlarmCoordinator:
             # concepts and are not armed here; the ramp settles to idle.
             await async_send_standard(self)
             self._settle_idle_if_not_active()
+            self._finish_cycle()
             return
 
         unavailable = [
@@ -433,6 +445,7 @@ class WakeAlarmCoordinator:
             )
             await async_send_player_unavailable(self, unavailable)
             self._settle_idle_if_not_active()
+            self._finish_cycle()
             return
 
         if self.current_media() is None:
@@ -442,9 +455,10 @@ class WakeAlarmCoordinator:
             )
             await async_send_no_media(self)
             self._settle_idle_if_not_active()
+            self._finish_cycle()
             return
 
-        await self._async_start_music(end_state=STATE_IDLE)
+        await self._async_start_music(end_state=STATE_IDLE, is_alarm=True)
         await async_send_standard(self)
 
     @callback
@@ -525,7 +539,11 @@ class WakeAlarmCoordinator:
         await self._async_start_music(end_state=STATE_IDLE)
 
     async def _async_start_music(
-        self, *, end_state: str, from_snooze: bool = False
+        self,
+        *,
+        end_state: str,
+        from_snooze: bool = False,
+        is_alarm: bool = False,
     ) -> None:
         if self._music_task is not None and not self._music_task.done():
             _LOGGER.debug(
@@ -551,12 +569,18 @@ class WakeAlarmCoordinator:
         self._set_state(STATE_PLAYING)
         self._music_cancel_event = asyncio.Event()
         self._music_task = self.hass.async_create_task(
-            self._music_runner(end_state, from_snooze=from_snooze)
+            self._music_runner(
+                end_state, from_snooze=from_snooze, is_alarm=is_alarm
+            )
         )
         self._start_auto_dismiss_if_configured()
 
     async def _music_runner(
-        self, end_state: str, *, from_snooze: bool = False
+        self,
+        end_state: str,
+        *,
+        from_snooze: bool = False,
+        is_alarm: bool = False,
     ) -> None:
         try:
             await async_run_music_sequence(
@@ -569,8 +593,14 @@ class WakeAlarmCoordinator:
         finally:
             self._music_task = None
             self._music_cancel_event = None
+            # Reaching here in PLAYING means the sequence ended naturally (a
+            # snooze/dismiss would have moved us out of PLAYING first). For a
+            # real alarm that's the end of the occurrence → run the
+            # after-script. Test-music (is_alarm=False) never does.
             if self._state == STATE_PLAYING:
                 self._set_state(end_state)
+                if is_alarm:
+                    self._finish_cycle()
 
     # -------------------- snooze + dismiss --------------------
 
@@ -629,11 +659,15 @@ class WakeAlarmCoordinator:
         if self._state != STATE_SNOOZING:
             return
         # Re-run music skipping the group join (group is already formed).
-        await self._async_start_music(end_state=STATE_IDLE, from_snooze=True)
+        await self._async_start_music(
+            end_state=STATE_IDLE, from_snooze=True, is_alarm=True
+        )
         if self._state == STATE_SNOOZING:
             # Nothing resumed — lights-only alarm (#22) or the media selection
-            # was cleared during the snooze. Don't hang in SNOOZING; settle.
+            # was cleared during the snooze. Don't hang in SNOOZING; settle,
+            # and close out the occurrence (run the after-script).
             self._set_state(STATE_IDLE)
+            self._finish_cycle()
 
     async def async_dismiss(self) -> None:
         """Full dismiss per the brief.
@@ -674,6 +708,9 @@ class WakeAlarmCoordinator:
         self._cancel_auto_dismiss()
 
         self._set_state(STATE_IDLE)
+        # Dismiss ends the occurrence (manual or via auto-dismiss, which calls
+        # here) → run the after-script. Snooze does not reach this path.
+        self._finish_cycle()
         # IDLE no longer recomputes, so roll forward explicitly. skip_today
         # excludes today's occurrence even if dismiss happened during the ramp
         # (before alarm_time) — otherwise we'd re-select and re-fire today.
@@ -855,6 +892,82 @@ class WakeAlarmCoordinator:
                 break
         while len(self._issued_contexts) > _CTX_MAX_ENTRIES:
             self._issued_contexts.popitem(last=False)
+
+    # -------------------- before/after script hooks (#24) --------------------
+
+    @callback
+    def _start_cycle(self) -> None:
+        """Begin an alarm occurrence and fire the before-script once.
+
+        Idempotent within an occurrence: the cycle may begin at ramp-start
+        (the usual case) or at alarm time when the ramp was skipped (length 0,
+        a restart inside the ramp window, or catch-up), and only the first
+        call fires the before-script.
+        """
+        if self._cycle_active:
+            return
+        self._cycle_active = True
+        self._run_script(CONF_BEFORE_SCRIPT, "before")
+
+    @callback
+    def _finish_cycle(self) -> None:
+        """End an alarm occurrence and fire the after-script once.
+
+        Fired on every terminal outcome — music finishing naturally, dismiss,
+        auto-dismiss, or a no-music settle (lights-only / players unavailable /
+        no media). Snooze keeps the cycle active, so it never fires here.
+        """
+        if not self._cycle_active:
+            return
+        self._cycle_active = False
+        self._run_script(CONF_AFTER_SCRIPT, "after")
+
+    @callback
+    def _abandon_cycle(self) -> None:
+        """End the occurrence without firing the after-script.
+
+        Used when the alarm is gated off (master switch / presence /
+        condition) at alarm time after the ramp already started a cycle: the
+        before may have run, but the alarm itself did not fire, so the
+        after-script is not appropriate. Resetting the flag keeps the next
+        occurrence's before-script working.
+        """
+        self._cycle_active = False
+
+    @callback
+    def _run_script(self, conf_key: str, label: str) -> None:
+        """Fire-and-forget the configured before/after script, if any.
+
+        Never awaited from the alarm path so a slow or failing script can
+        never delay the wake-up. The instance slug + name are passed as script
+        variables for context.
+        """
+        target = self.entry.data.get(conf_key)
+        if not target:
+            return
+        self.hass.async_create_task(self._async_call_script(target, label))
+
+    async def _async_call_script(self, target: str, label: str) -> None:
+        domain, _, object_id = target.partition(".")
+        if domain != "script" or not object_id:
+            _LOGGER.warning(
+                "%s-script target %r for %s is not a script entity; skipping",
+                label,
+                target,
+                self.slug,
+            )
+            return
+        try:
+            await self.hass.services.async_call(
+                "script",
+                object_id,
+                {"slug": self.slug, "name": self.name},
+                blocking=False,
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception(
+                "%s-script %s for %s failed", label, target, self.slug
+            )
 
     # -------------------- state machine --------------------
 

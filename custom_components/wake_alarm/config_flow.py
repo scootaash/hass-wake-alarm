@@ -23,6 +23,8 @@ from homeassistant.helpers import selector
 from homeassistant.util import slugify
 
 from .const import (
+    CONF_AFTER_SCRIPT,
+    CONF_BEFORE_SCRIPT,
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
@@ -168,6 +170,16 @@ def _build_schema(
         )
     ] = notify
 
+    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+        fields[
+            vol.Optional(
+                key,
+                description={"suggested_value": defaults.get(key, "")},
+            )
+        ] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="script")
+        )
+
     return vol.Schema(fields)
 
 
@@ -221,6 +233,11 @@ def _validate_input(
     if condition:
         data[CONF_CONDITION_ENTITY] = condition
 
+    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+        script = user_input.get(key)
+        if script:
+            data[key] = script
+
     for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
         v = (user_input.get(k) or "").strip()
         if v:
@@ -232,7 +249,7 @@ def _validate_input(
 class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-screen create flow."""
 
-    VERSION = 3
+    VERSION = 4
 
     @staticmethod
     @callback
@@ -291,6 +308,8 @@ class WakeAlarmOptionsFlow(OptionsFlow):
                 for k in (
                     CONF_PERSON_ENTITY,
                     CONF_CONDITION_ENTITY,
+                    CONF_BEFORE_SCRIPT,
+                    CONF_AFTER_SCRIPT,
                     CONF_NOTIFY_TARGET_STANDARD,
                     CONF_NOTIFY_TARGET_URGENT,
                 ):
