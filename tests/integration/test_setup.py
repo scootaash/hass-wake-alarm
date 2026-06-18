@@ -38,7 +38,7 @@ from custom_components.wake_alarm.const import (
     reason="card registration (_async_register_card) breaks full setup: "
     "#19 duplicate static route, #20 blocking manifest open(), and "
     "frontend coupling not satisfiable under PHACC",
-    strict=False,
+    strict=True,
 )
 async def test_full_entry_setup_and_unload(hass) -> None:
     """The entry sets up its platforms and unloads cleanly."""
