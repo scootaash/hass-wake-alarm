@@ -4,7 +4,33 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.5.0 — 2026-06-18
+
+Feature release: lights and media players are now independent (silent or
+music-only alarms), with new condition and script gates, plus a substantial
+round of state-machine and lifecycle hardening driven by a deep review.
+
+### Added
+
+- **Media player is optional — lights-only or music-only alarms (#22).** Lights
+  and media players are each individually optional; pick at least one. With no
+  media player the alarm runs the light ramp and sends the standard
+  notification at alarm time (the "speaker unavailable" / "no media" urgent
+  notices are suppressed) and settles — snooze and auto-dismiss are music-only
+  and aren't armed.
+- **Condition-sensor gate (#23).** An optional `binary_sensor` gates the cycle
+  on an on/off state (bed sensor, Workday sensor, etc.). Works like presence —
+  checked twice, at ramp-start and again at `alarm_time` — and is ANDed with
+  presence when both are set.
+- **Before / after script hooks (#24).** Two optional `script.*` targets run at
+  the start and end of the cycle (ramp-start or alarm time, and music end /
+  dismiss / auto-dismiss; not on snooze). Both fire non-blocking so a slow or
+  failing script can never delay the wake-up, and receive the instance `slug`
+  and `name` as variables.
+- **Restart catch-up.** If Home Assistant is down across `alarm_time` but boots
+  back within `CATCHUP_GRACE_MIN` minutes (default 15), the alarm fires
+  immediately on startup so the user is still woken (music only; the light ramp
+  is not replayed). Beyond the window the schedule simply rolls forward.
 
 ### Changed
 
@@ -21,16 +47,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `alarm_time` for the music. Someone out when the ramp would start but home by
   the alarm time is still woken; someone who leaves in between gets the lights
   but no music.
-
-### Added
-
-- **Restart catch-up.** If Home Assistant is down across `alarm_time` but boots
-  back within `CATCHUP_GRACE_MIN` minutes (default 15), the alarm fires
-  immediately on startup so the user is still woken (music only; the light ramp
-  is not replayed). Beyond the window the schedule simply rolls forward.
+- **The card hides music-only controls for a lights-only alarm (#46).** The
+  media picker, "Test music", and "Test urgent notification" controls are
+  hidden when no media player is configured, since they'd be no-ops.
+- **A player failing mid-sequence no longer aborts the alarm (#45).** Music
+  service calls are routed through a guard that logs and continues, so a single
+  speaker dropping out (or a half-formed group) can't take the rest of the
+  wake-up down with it.
 
 ### Fixed
 
+- **Unload/reload teardown race (#48).** A cancelled music task's completion
+  handler ran during `async_unload` while still PLAYING, which (with a deferred
+  recompute pending) re-armed the schedule timers after teardown had cancelled
+  them and fired the after-script on unload/reload. Teardown now marks itself
+  and makes the recompute / script paths inert.
+- **Snooze during the ramp resumed ungrouped (#48).** Snoozing before any music
+  played resumed via the snooze fast-path and skipped the Sonos group-join, so
+  a multi-room alarm came back ungrouped. It now does a full music start unless
+  music was actually playing when the snooze began.
+- **Card stuck on a transient resolve error (#48).** A card that rendered before
+  the integration finished registering its entities stuck on the error until a
+  dashboard reload; it now retries (bounded) on later updates.
+- **Mid-occurrence interference (#43, #44).** A settings change while the alarm
+  is firing is deferred to the next idle settle so it can't arm a second fire
+  the same day, and the test buttons are refused during the ramp→alarm gap so
+  they can't silence the real alarm.
+- **Auto-dismiss now fires during a snooze (#38)** so a long snooze can't let
+  the alarm outlive the configured auto-dismiss window; background tasks are
+  tracked and cancelled on unload (#35).
+- **Stranded alarm cycle when disabled during the ramp→alarm gap (#34)** — the
+  occurrence is now closed out so the next day's before-script still runs.
+- **DST gap / fall-back alarm-time semantics pinned (#36).** Alarms on the far
+  side of a transition fire at the intended wall-clock time; gap/overlap times
+  resolve to a single deterministic instant.
+- **Card registration hardening (#19, #20, #37).** The cache-bust version is
+  read off the event loop (no blocking `open()`), the static route is claimed
+  before the await so concurrent entry setups can't double-register it, and the
+  bundle `is_file()` check runs in the executor. Broken Music Assistant artwork
+  in the media picker is fixed by signing HA proxy URLs.
 - **Ramp restarting from zero at alarm time.** When the light ramp finished a
   few seconds before the alarm/music time, the coordinator returned to IDLE and
   recomputed the schedule, re-selecting the still-future alarm for the same day
@@ -38,8 +93,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   06:00 / 30-min alarm ramped 05:30→05:59, then again 05:59→06:29. Fixed
   structurally: the schedule now rolls forward only when the alarm timer fires
   (`now >= alarm_time`, so the next-occurrence computation can never re-select
-  today), and the IDLE transition no longer recomputes. The previous
-  `_music_start_pending` workaround has been removed.
+  today), and the IDLE transition no longer recomputes.
+
+### Migration
+
+Config entry version bumps from `2` to `4` (v2→v3 added the condition gate,
+v3→v4 added the script hooks). Both steps are additive no-ops — no stored data
+changes and nothing to re-toggle. Existing lights/media/presence/notification
+settings and media selections are preserved.
+
+### Tests / CI
+
+- HA-backed coordinator tests driving a real coordinator with a frozen clock,
+  plus `config_flow` and `async_migrate_entry` suites (#39, #40), coverage
+  reporting, and a CI matrix across the min and latest supported HA.
+- HACS + hassfest validation workflow.
 
 ## 0.4.0-beta.1 — 2026-05-13
 
