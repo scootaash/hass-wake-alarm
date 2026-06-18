@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -19,7 +18,8 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er, selector
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import selector
 from homeassistant.util import slugify
 
 from .const import (

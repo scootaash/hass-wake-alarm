@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from typing import Callable
 
 from homeassistant.config_entries import ConfigEntry
@@ -34,6 +35,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
+from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .const import (
     CATCHUP_GRACE_MIN,
     CONF_LIGHT_ENTITIES,
@@ -49,7 +51,6 @@ from .const import (
     STATE_RAMPING,
     STATE_SNOOZING,
 )
-from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .light_ramp import async_run_light_ramp
 from .music_sequence import async_run_music_sequence
 from .notifications import (

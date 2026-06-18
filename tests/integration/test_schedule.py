@@ -5,7 +5,8 @@ by anchoring `now` to a date right around a UK clocks-forward transition.
 """
 from __future__ import annotations
 
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
 from types import ModuleType
 from zoneinfo import ZoneInfo
 
