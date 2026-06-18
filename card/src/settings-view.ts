@@ -2,6 +2,7 @@ import { LitElement, css, html, type PropertyValues, type TemplateResult } from 
 import { customElement, property, state } from "lit/decorators.js";
 import { sharedStyles } from "./styles";
 import "./media-browser";
+import "./media-thumb";
 import type { HomeAssistant, MediaPickedItem, RelatedEntities } from "./types";
 
 interface NumberSpec {
@@ -145,20 +146,22 @@ export class WakeAlarmSettingsView extends LitElement {
           <div class="media-row" @click=${this._openMediaPicker}>
             ${hasMedia
               ? html`
-                  ${mediaThumb
-                    ? html`<img src=${mediaThumb} alt="" class="thumb" />`
-                    : html`<div class="thumb thumb-placeholder">
-                        <ha-icon icon="mdi:music"></ha-icon>
-                      </div>`}
+                  <wake-alarm-thumb
+                    class="thumb"
+                    .hass=${this.hass}
+                    .thumbnail=${mediaThumb ?? null}
+                    icon="mdi:music"
+                  ></wake-alarm-thumb>
                   <div class="media-text">
                     <div class="media-title">${mediaTitle}</div>
                     <div class="media-sub">Tap to change</div>
                   </div>
                 `
               : html`
-                  <div class="thumb thumb-placeholder">
-                    <ha-icon icon="mdi:music-note-plus"></ha-icon>
-                  </div>
+                  <wake-alarm-thumb
+                    class="thumb"
+                    icon="mdi:music-note-plus"
+                  ></wake-alarm-thumb>
                   <div class="media-text">
                     <div class="media-title">No media picked</div>
                     <div class="media-sub">Tap to choose</div>
@@ -379,16 +382,8 @@ export class WakeAlarmSettingsView extends LitElement {
       .media-row:hover { background: var(--secondary-background-color); }
       .thumb {
         width: 48px;
-        height: 48px;
         border-radius: 8px;
-        object-fit: cover;
-      }
-      .thumb-placeholder {
-        background: var(--secondary-background-color);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--secondary-text-color);
+        flex: 0 0 auto;
       }
       .media-text { display: flex; flex-direction: column; gap: 2px; }
       .media-title { font-size: 1rem; font-weight: 500; }
