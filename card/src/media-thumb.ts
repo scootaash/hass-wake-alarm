@@ -21,7 +21,7 @@ import {
   type TemplateResult,
 } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { resolveThumbnailUrl } from "./media-image";
+import { resolveThumbnailUrl, thumbnailAction } from "./media-image";
 import type { HomeAssistant } from "./types";
 
 @customElement("wake-alarm-thumb")
@@ -33,20 +33,40 @@ export class WakeAlarmThumb extends LitElement {
   @state() private _src?: string;
   @state() private _failed = false;
 
-  protected willUpdate(changed: PropertyValues): void {
-    if (changed.has("thumbnail") || changed.has("hass")) {
-      void this._resolve();
+  // The thumbnail value we last signed (or undefined if none). Used to skip the
+  // re-sign that an unchanged thumbnail would otherwise trigger on every hass
+  // state update — the flicker/reload from #19.
+  private _resolvedFor?: string | null;
+  private _resolving = false;
+
+  protected willUpdate(_changed: PropertyValues): void {
+    switch (thumbnailAction(this.thumbnail, this._resolvedFor)) {
+      case "resolve":
+        if (this.hass && !this._resolving) void this._resolve();
+        break;
+      case "clear":
+        this._resolvedFor = undefined;
+        this._src = undefined;
+        this._failed = false;
+        break;
     }
   }
 
   private async _resolve(): Promise<void> {
     const thumb = this.thumbnail;
-    this._failed = false;
-    this._src = undefined;
     if (!thumb || !this.hass) return;
-    const url = await resolveThumbnailUrl(this.hass, thumb);
-    // A newer thumbnail may have been assigned while we awaited signing.
-    if (this.thumbnail === thumb) this._src = url;
+    this._resolving = true;
+    // Record the in-flight thumbnail synchronously so a hass update mid-await
+    // doesn't kick off a second resolve for the same artwork.
+    this._resolvedFor = thumb;
+    this._failed = false;
+    try {
+      const url = await resolveThumbnailUrl(this.hass, thumb);
+      // A newer thumbnail may have been assigned while we awaited signing.
+      if (this.thumbnail === thumb) this._src = url;
+    } finally {
+      this._resolving = false;
+    }
   }
 
   protected render(): TemplateResult {
