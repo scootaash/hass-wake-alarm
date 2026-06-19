@@ -77,11 +77,12 @@ slug HA derived from your alarm's name.
    never dims a light below its current brightness — if you manually
    brighten a bedroom light mid-ramp it stays brightened.
 3. **Music start** (`alarm_time`). State goes to `playing`. For a
-   single speaker the integration sets volume to 0, `play_media`'s the
-   selected favourite or playlist, then fades volume from 0 to the
-   configured target across `music_fade_sec`. For multiple Sonos
-   speakers the same sequence runs synchronously across the group,
-   with all the join / shuffle / settle-delay quirks Sonos requires.
+   single speaker the integration sets volume to 0, shuffles,
+   `play_media`'s the selected favourite or playlist, skips a random
+   1–4 tracks, then fades volume from 0 to the configured target across
+   `music_fade_sec`. For multiple Sonos speakers the same sequence runs
+   synchronously across the group, with all the join / shuffle /
+   settle-delay quirks Sonos requires.
 4. **Random track-skip.** After the queue starts, the music sequence
    skips 1–4 tracks forward so each alarm and each snooze begins on a
    different track from the favourite, not always track 1.

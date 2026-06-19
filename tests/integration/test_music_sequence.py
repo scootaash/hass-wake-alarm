@@ -9,11 +9,25 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import async_mock_service
 
+import custom_components.wake_alarm.music_sequence as ms
 from custom_components.wake_alarm.const import CONF_MEDIA_PLAYER_ENTITIES
 from custom_components.wake_alarm.music_sequence import async_run_music_sequence
+
+
+@pytest.fixture(autouse=True)
+def _fast_timings(monkeypatch):
+    """Zero the Sonos/queue settle delays so the real sequence runs instantly."""
+    for const in (
+        "_PLAY_QUEUE_SETTLE_SEC",
+        "_RANDOM_SKIP_INTERVAL_SEC",
+        "_UNJOIN_SETTLE_SEC",
+        "_JOIN_SETTLE_SEC",
+    ):
+        monkeypatch.setattr(ms, const, 0)
 
 MEDIA = {
     "content_id": "spotify:playlist:wake",
@@ -90,3 +104,40 @@ async def test_one_of_two_players_failing_still_plays_the_other(hass) -> None:
     # The bad player's volume failure didn't abort the loop before the good one.
     assert good in played
     assert bad in played
+
+
+async def test_single_player_shuffles_and_random_skips(hass) -> None:
+    """A single player shuffles and skips a random 1-4 tracks so it doesn't
+    always start on the same track (parity with the multi-Sonos path)."""
+    player = "media_player.solo"
+    hass.states.async_set(player, "idle")  # no GROUPING feature → single path
+    shuffle = async_mock_service(hass, "media_player", "shuffle_set")
+    play = async_mock_service(hass, "media_player", "play_media")
+    skips = async_mock_service(hass, "media_player", "media_next_track")
+    async_mock_service(hass, "media_player", "volume_set")
+
+    coord = FakeCoordinator(hass, [player])
+    await async_run_music_sequence(coord, asyncio.Event())
+    await hass.async_block_till_done()
+
+    assert len(shuffle) == 1
+    assert shuffle[0].data["shuffle"] is True
+    assert len(play) == 1
+    assert 1 <= len(skips) <= 4  # random 1-4 next-track calls
+
+
+async def test_single_player_skip_cancels_cleanly(hass) -> None:
+    """A cancel during the single-player settle/skip aborts without playing."""
+    player = "media_player.solo"
+    hass.states.async_set(player, "idle")
+    async_mock_service(hass, "media_player", "shuffle_set")
+    async_mock_service(hass, "media_player", "play_media")
+    async_mock_service(hass, "media_player", "media_next_track")
+    async_mock_service(hass, "media_player", "volume_set")
+
+    cancel = asyncio.Event()
+    cancel.set()  # already cancelled
+    coord = FakeCoordinator(hass, [player])
+    # Must return promptly without raising.
+    await async_run_music_sequence(coord, cancel)
+    await hass.async_block_till_done()

@@ -62,6 +62,12 @@ round of state-machine and lifecycle hardening driven by a deep review.
   service calls are routed through a guard that logs and continues, so a single
   speaker dropping out (or a half-formed group) can't take the rest of the
   wake-up down with it.
+- **Single-player music now shuffles + random-skips like the Sonos group
+  path.** Previously a single speaker (or any non-grouping set) replayed the
+  selected playlist/favourite from the top every alarm and snooze. It now
+  `shuffle_set`s and skips a random 1–4 tracks (inaudibly, at volume 0, before
+  the fade), so the wake-up song varies. Degrades gracefully on players that
+  don't support shuffle / next-track.
 
 ### Fixed
 
