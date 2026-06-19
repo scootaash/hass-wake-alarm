@@ -6,8 +6,10 @@ Single player (or multi-player without GROUPING — the config flow blocks
 the latter, but defensive):
 
     1. volume_set 0 on all configured players
-    2. media_player.play_media on each
-    3. linear fade 0 → target_volume across `music_fade_sec` seconds in
+    2. shuffle_set true on each (so a playlist doesn't always start on track 1)
+    3. media_player.play_media on each
+    4. settle, then a random 1–4 track skip on each (inaudible at volume 0)
+    5. linear fade 0 → target_volume across `music_fade_sec` seconds in
        `_FADE_STEPS` steps
 
 Multi-player Sonos / GROUPING-capable:
@@ -141,6 +143,17 @@ async def _run_single_player(
     if cancel_event.is_set():
         return
 
+    # Shuffle each player before playing so a multi-track playlist/favourite
+    # doesn't always start on track 1. _safe_call makes this a no-op for a
+    # player that doesn't advertise shuffle.
+    for player in players:
+        await _safe_call(
+            coordinator,
+            "shuffle_set",
+            {"entity_id": player, "shuffle": True},
+            blocking=True,
+        )
+
     for player in players:
         await _safe_call(
             coordinator,
@@ -154,6 +167,16 @@ async def _run_single_player(
         )
     if cancel_event.is_set():
         return
+
+    # Let the queue start (still at volume 0, so the skip is inaudible), then
+    # skip a random 1-4 tracks so neither the first alarm nor a snooze resume
+    # begins on the same track — the same rationale as the multi-Sonos path.
+    if await _interruptible_sleep(_PLAY_QUEUE_SETTLE_SEC, cancel_event):
+        return
+    for player in players:
+        await _random_skip(coordinator, player, cancel_event)
+        if cancel_event.is_set():
+            return
 
     await _fade(coordinator, players, 0.0, target_volume, fade_sec, cancel_event)
 

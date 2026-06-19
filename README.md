@@ -77,11 +77,12 @@ slug HA derived from your alarm's name.
    never dims a light below its current brightness — if you manually
    brighten a bedroom light mid-ramp it stays brightened.
 3. **Music start** (`alarm_time`). State goes to `playing`. For a
-   single speaker the integration sets volume to 0, `play_media`'s the
-   selected favourite or playlist, then fades volume from 0 to the
-   configured target across `music_fade_sec`. For multiple Sonos
-   speakers the same sequence runs synchronously across the group,
-   with all the join / shuffle / settle-delay quirks Sonos requires.
+   single speaker the integration sets volume to 0, shuffles,
+   `play_media`'s the selected favourite or playlist, skips a random
+   1–4 tracks, then fades volume from 0 to the configured target across
+   `music_fade_sec`. For multiple Sonos speakers the same sequence runs
+   synchronously across the group, with all the join / shuffle /
+   settle-delay quirks Sonos requires.
 4. **Random track-skip.** After the queue starts, the music sequence
    skips 1–4 tracks forward so each alarm and each snooze begins on a
    different track from the favourite, not always track 1.
@@ -121,20 +122,27 @@ exactly like presence: checked twice, at ramp start and again at
 entity and a condition sensor are set they are **ANDed** — both have to
 pass. Leave it blank to skip the check.
 
-### Run a script before / after
+### Run a script before / at / after
 
-Two optional **script** hooks let you run your own automation around the
+Three optional **script** hooks let you run your own automation around the
 alarm without baking it into the integration — a TTS greeting, a coffee
 machine, blinds, etc.
 
-- **Before** runs when the cycle begins: at ramp start, or at `alarm_time`
-  when there's no light ramp. It does not run if the alarm is gated off by
+- **Before** runs when the wake-up sequence *begins* — at the ramp start,
+  i.e. `Length` minutes before `alarm_time`. That start point is the same
+  even for a music-only alarm (there are no lights to ramp, but the sequence
+  still begins then). It does not run if the alarm is gated off by
+  presence/condition.
+- **At alarm** runs *exactly at* `alarm_time` — the moment the music starts
+  (or, for a lights-only alarm, when the alarm fires). This is the hook for
+  "do X the instant the alarm goes off". Skipped if the alarm is gated off by
   presence/condition.
 - **After** runs when the cycle ends: music finishing on its own, a
-  dismiss, or an auto-dismiss. It does **not** run on snooze.
+  dismiss, or an auto-dismiss (a lights-only alarm runs it at `alarm_time`).
+  It does **not** run on snooze.
 
-Both fire non-blocking, so a slow or failing script can never delay the
-wake-up, and both receive the instance `slug` and `name` as script
+All three fire non-blocking, so a slow or failing script can never delay the
+wake-up, and each receives the instance `slug` and `name` as script
 variables for context.
 
 ### Snooze and Dismiss

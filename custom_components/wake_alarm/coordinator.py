@@ -39,6 +39,7 @@ from ._pure import ScheduleDecision, compute_next_fire, plan_schedule
 from .const import (
     CATCHUP_GRACE_MIN,
     CONF_AFTER_SCRIPT,
+    CONF_AT_ALARM_SCRIPT,
     CONF_BEFORE_SCRIPT,
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
@@ -530,6 +531,12 @@ class WakeAlarmCoordinator:
                 return
             _LOGGER.debug("%s: alarm firing (music phase)", self.slug)
             self._start_cycle()
+            # The at-alarm hook fires exactly at alarm_time — the moment the
+            # alarm sounds — for every non-gated outcome (music, lights-only,
+            # players unavailable, no media). Non-blocking, so it never delays
+            # the wake-up. Only reached once the gate has passed, so it does not
+            # fire when presence/condition skip the alarm.
+            self._run_script(CONF_AT_ALARM_SCRIPT, "at-alarm")
             await self._fire_music()
         finally:
             self.async_recompute_schedule()

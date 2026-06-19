@@ -24,6 +24,7 @@ from homeassistant.util import slugify
 
 from .const import (
     CONF_AFTER_SCRIPT,
+    CONF_AT_ALARM_SCRIPT,
     CONF_BEFORE_SCRIPT,
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
@@ -170,7 +171,7 @@ def _build_schema(
         )
     ] = notify
 
-    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+    for key in (CONF_BEFORE_SCRIPT, CONF_AT_ALARM_SCRIPT, CONF_AFTER_SCRIPT):
         fields[
             vol.Optional(
                 key,
@@ -233,7 +234,7 @@ def _validate_input(
     if condition:
         data[CONF_CONDITION_ENTITY] = condition
 
-    for key in (CONF_BEFORE_SCRIPT, CONF_AFTER_SCRIPT):
+    for key in (CONF_BEFORE_SCRIPT, CONF_AT_ALARM_SCRIPT, CONF_AFTER_SCRIPT):
         script = user_input.get(key)
         if script:
             data[key] = script
@@ -249,7 +250,7 @@ def _validate_input(
 class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-screen create flow."""
 
-    VERSION = 4
+    VERSION = 5
 
     @staticmethod
     @callback
@@ -309,6 +310,7 @@ class WakeAlarmOptionsFlow(OptionsFlow):
                     CONF_PERSON_ENTITY,
                     CONF_CONDITION_ENTITY,
                     CONF_BEFORE_SCRIPT,
+                    CONF_AT_ALARM_SCRIPT,
                     CONF_AFTER_SCRIPT,
                     CONF_NOTIFY_TARGET_STANDARD,
                     CONF_NOTIFY_TARGET_URGENT,
