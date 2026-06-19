@@ -167,6 +167,53 @@ class WakeAlarmCoordinator:
         """Wall-clock time the snooze timer will fire (None unless snoozing)."""
         return self._snooze_finishes_at
 
+    @callback
+    def diagnostics_snapshot(self) -> dict:
+        """Live state snapshot for config-entry diagnostics (no secrets).
+
+        Surfaces the scheduler decision, state-machine flags, which timers/tasks
+        are armed, and a read-back of the entities the coordinator drives — the
+        data needed to diagnose "did it schedule/fire correctly?" without
+        reproducing under debug logging.
+        """
+        def _iso(value: datetime | None) -> str | None:
+            return value.isoformat() if value is not None else None
+
+        alarm_time = self._read_alarm_time()
+        return {
+            "state": self._state,
+            "is_active": self.is_active,
+            "cycle_active": self._cycle_active,
+            "recompute_pending": self._recompute_pending,
+            "unloading": self._unloading,
+            "next_fire": _iso(self._next_fire),
+            "next_ramp_start": _iso(self._next_ramp_start),
+            "snooze_finishes_at": _iso(self._snooze_finishes_at),
+            "auto_dismiss_deadline": _iso(self._auto_dismiss_deadline),
+            "timers_armed": {
+                "ramp": self._cancel_ramp_schedule is not None,
+                "alarm": self._cancel_alarm_schedule is not None,
+                "snooze": self._snooze_cancel is not None,
+                "auto_dismiss": self._auto_dismiss_cancel is not None,
+            },
+            "tasks": {
+                "ramp_running": (
+                    self._ramp_task is not None and not self._ramp_task.done()
+                ),
+                "music_running": (
+                    self._music_task is not None and not self._music_task.done()
+                ),
+                "background": len(self._background_tasks),
+            },
+            "config_readback": {
+                "enabled": self._read_enabled(),
+                "alarm_time": alarm_time.isoformat() if alarm_time else None,
+                "enabled_days": sorted(self._read_enabled_days()),
+                "length_min": self.read_number("length_min", DEFAULT_LENGTH_MIN),
+            },
+            "media_selected": self.current_media() is not None,
+        }
+
     def async_add_listener(
         self, update_callback: Callable[[], None]
     ) -> Callable[[], None]:
@@ -314,6 +361,10 @@ class WakeAlarmCoordinator:
             # otherwise close the occurrence — will never run. End any pending
             # occurrence here so _cycle_active can't get stranded True and
             # suppress the next occurrence's before-script (#34).
+            _LOGGER.debug(
+                "%s: no schedule (disabled / no enabled days / no alarm time)",
+                self.slug,
+            )
             self._abandon_cycle()
             self._next_fire = None
             self._next_ramp_start = None
@@ -327,9 +378,20 @@ class WakeAlarmCoordinator:
             # HA was down past alarm_time but within grace: fire the alarm now.
             # Music only — a partial ramp from a cold boot adds no value. The
             # alarm callback rolls the schedule forward to the next day itself.
+            _LOGGER.debug(
+                "%s: restart catch-up — firing alarm now (target %s)",
+                self.slug,
+                decision.next_fire,
+            )
             self._track_task(self._async_on_alarm(dt_util.now()))
         else:
             now = dt_util.now()
+            _LOGGER.debug(
+                "%s: scheduled next_fire=%s ramp_start=%s",
+                self.slug,
+                decision.next_fire,
+                decision.ramp_start,
+            )
             if (
                 decision.ramp_start is not None
                 and decision.ramp_start > now
@@ -444,6 +506,7 @@ class WakeAlarmCoordinator:
             return
         if not self._gate_ok(what="light ramp"):
             return
+        _LOGGER.debug("%s: ramp-start firing", self.slug)
         self._start_cycle()
         await self._async_start_ramp(end_state=STATE_IDLE)
 
@@ -465,6 +528,7 @@ class WakeAlarmCoordinator:
             if not self._gate_ok(what="alarm"):
                 self._abandon_cycle()
                 return
+            _LOGGER.debug("%s: alarm firing (music phase)", self.slug)
             self._start_cycle()
             await self._fire_music()
         finally:
@@ -722,6 +786,12 @@ class WakeAlarmCoordinator:
 
         snooze_min = int(self.read_number("snooze_min", DEFAULT_SNOOZE_MIN))
         self._snooze_finishes_at = dt_util.now() + timedelta(minutes=snooze_min)
+        _LOGGER.debug(
+            "%s: snoozing for %d min (resume at %s)",
+            self.slug,
+            snooze_min,
+            self._snooze_finishes_at,
+        )
         self._snooze_cancel = async_call_later(
             self.hass,
             snooze_min * 60,
@@ -735,6 +805,11 @@ class WakeAlarmCoordinator:
         self._snooze_finishes_at = None
         if self._state != STATE_SNOOZING:
             return
+        _LOGGER.debug(
+            "%s: snooze finished — resuming music (from_playing=%s)",
+            self.slug,
+            self._snooze_from_playing,
+        )
         # Re-run music. Skip the Sonos group-join preamble only if the group
         # was already formed during a prior PLAYING phase; snoozing mid-ramp
         # has no group yet, so it needs the full start.
@@ -1032,6 +1107,7 @@ class WakeAlarmCoordinator:
         target = self.entry.data.get(conf_key)
         if not target:
             return
+        _LOGGER.debug("%s: running %s-script %s", self.slug, label, target)
         self._track_task(self._async_call_script(target, label))
 
     async def _async_call_script(self, target: str, label: str) -> None:
@@ -1073,6 +1149,7 @@ class WakeAlarmCoordinator:
             raise ValueError(f"unknown coordinator state: {new_state}")
         if self._state == new_state:
             return
+        _LOGGER.debug("%s: state %s -> %s", self.slug, self._state, new_state)
         self._state = new_state
         if new_state == STATE_IDLE:
             # Clear the auto-dismiss deadline so the next fire starts fresh.

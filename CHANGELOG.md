@@ -31,6 +31,12 @@ round of state-machine and lifecycle hardening driven by a deep review.
   back within `CATCHUP_GRACE_MIN` minutes (default 15), the alarm fires
   immediately on startup so the user is still woken (music only; the light ramp
   is not replayed). Beyond the window the schedule simply rolls forward.
+- **Troubleshooting: debug logging + diagnostics.** DEBUG-level logs across the
+  scheduler and state machine (schedule armed / catch-up, every state
+  transition, ramp-start, alarm fire, snooze arm/resume, before/after script),
+  plus a config-entry **Download diagnostics** snapshot (redacting person /
+  notify targets) showing the live schedule, state flags, and which timers /
+  tasks are armed.
 
 ### Changed
 
