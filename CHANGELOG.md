@@ -22,11 +22,13 @@ round of state-machine and lifecycle hardening driven by a deep review.
   on an on/off state (bed sensor, Workday sensor, etc.). Works like presence —
   checked twice, at ramp-start and again at `alarm_time` — and is ANDed with
   presence when both are set.
-- **Before / after script hooks (#24).** Two optional `script.*` targets run at
-  the start and end of the cycle (ramp-start or alarm time, and music end /
-  dismiss / auto-dismiss; not on snooze). Both fire non-blocking so a slow or
-  failing script can never delay the wake-up, and receive the instance `slug`
-  and `name` as variables.
+- **Before / at-alarm / after script hooks (#24).** Three optional `script.*`
+  targets run around the alarm: **before** at the ramp start (the sequence
+  begins, `Length` minutes before the alarm time), **at-alarm** exactly at the
+  alarm time (the moment music starts, or the fire moment for a lights-only
+  alarm), and **after** when the cycle ends (music end / dismiss / auto-dismiss;
+  not on snooze). All fire non-blocking so a slow or failing script can never
+  delay the wake-up, and receive the instance `slug` and `name` as variables.
 - **Restart catch-up.** If Home Assistant is down across `alarm_time` but boots
   back within `CATCHUP_GRACE_MIN` minutes (default 15), the alarm fires
   immediately on startup so the user is still woken (music only; the light ramp
@@ -103,10 +105,10 @@ round of state-machine and lifecycle hardening driven by a deep review.
 
 ### Migration
 
-Config entry version bumps from `2` to `4` (v2→v3 added the condition gate,
-v3→v4 added the script hooks). Both steps are additive no-ops — no stored data
-changes and nothing to re-toggle. Existing lights/media/presence/notification
-settings and media selections are preserved.
+Config entry version bumps from `2` to `5` (v2→v3 added the condition gate,
+v3→v4 the before/after script hooks, v4→v5 the at-alarm hook). All steps are
+additive no-ops — no stored data changes and nothing to re-toggle. Existing
+lights/media/presence/notification settings and media selections are preserved.
 
 ### Tests / CI
 

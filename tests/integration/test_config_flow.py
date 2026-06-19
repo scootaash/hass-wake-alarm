@@ -22,6 +22,7 @@ from custom_components.wake_alarm.config_flow import (
 )
 from custom_components.wake_alarm.const import (
     CONF_AFTER_SCRIPT,
+    CONF_AT_ALARM_SCRIPT,
     CONF_BEFORE_SCRIPT,
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
@@ -184,11 +185,12 @@ async def test_options_flow_drops_cleared_optional_fields(hass) -> None:
             CONF_PERSON_ENTITY: "person.me",
             CONF_CONDITION_ENTITY: "binary_sensor.bed",
             CONF_BEFORE_SCRIPT: "script.before",
+            CONF_AT_ALARM_SCRIPT: "script.at_alarm",
             CONF_AFTER_SCRIPT: "script.after",
             CONF_NOTIFY_TARGET_STANDARD: "notify.mobile",
             CONF_NOTIFY_TARGET_URGENT: "notify.mobile",
         },
-        version=4,
+        version=5,
         unique_id="test",
     )
     entry.add_to_hass(hass)
@@ -211,6 +213,7 @@ async def test_options_flow_drops_cleared_optional_fields(hass) -> None:
         CONF_PERSON_ENTITY,
         CONF_CONDITION_ENTITY,
         CONF_BEFORE_SCRIPT,
+        CONF_AT_ALARM_SCRIPT,
         CONF_AFTER_SCRIPT,
         CONF_NOTIFY_TARGET_STANDARD,
         CONF_NOTIFY_TARGET_URGENT,

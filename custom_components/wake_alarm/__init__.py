@@ -93,8 +93,11 @@ async def async_migrate_entry(
 
     v3 → v4: added the optional before/after script hooks (#24). Additive
     optional fields; this step only advances the version.
+
+    v4 → v5: added the optional at-alarm script hook. Additive optional field;
+    this step only advances the version.
     """
-    if entry.version > 4:
+    if entry.version > 5:
         _LOGGER.error(
             "wake_alarm config entry %s is at version %s, cannot downgrade",
             entry.title,
@@ -133,6 +136,9 @@ async def async_migrate_entry(
 
     if entry.version == 3:
         hass.config_entries.async_update_entry(entry, version=4)
+
+    if entry.version == 4:
+        hass.config_entries.async_update_entry(entry, version=5)
 
     return True
 

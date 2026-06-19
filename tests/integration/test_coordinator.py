@@ -693,6 +693,91 @@ async def test_gated_alarm_after_ramp_abandons_cycle(env, freezer) -> None:
 
 
 # --------------------------------------------------------------------------
+# at-alarm script hook (fires exactly at alarm time)
+# --------------------------------------------------------------------------
+
+
+async def test_at_alarm_script_fires_at_alarm_time(env, freezer) -> None:
+    """`at_alarm` fires at alarm_time — after `before` (ramp start), with music."""
+    freezer.move_to(at(5, 0))
+    before = async_mock_service(env.hass, "script", "before")
+    at_alarm = async_mock_service(env.hass, "script", "at_alarm")
+    after = async_mock_service(env.hass, "script", "after")
+    entry = env.make_entry(
+        before_script="script.before",
+        at_alarm_script="script.at_alarm",
+        after_script="script.after",
+    )
+    await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))  # ramp start
+    assert len(before) == 1
+    assert len(at_alarm) == 0  # the alarm itself hasn't fired yet
+
+    await fire(env.hass, freezer, at(7, 0))  # alarm time
+    await env.hass.async_block_till_done()
+    assert len(at_alarm) == 1
+    assert at_alarm[0].data.get("slug") == "test"
+    assert at_alarm[0].data.get("name") == "Test Alarm"
+    assert env.music.calls == 1
+    assert len(after) == 1
+
+
+async def test_at_alarm_script_fires_for_lights_only(env, freezer) -> None:
+    """Lights-only (no media): `at_alarm` still fires at alarm_time."""
+    freezer.move_to(at(5, 0))
+    at_alarm = async_mock_service(env.hass, "script", "at_alarm")
+    entry = env.make_entry(
+        media_player_entities=[], at_alarm_script="script.at_alarm"
+    )
+    await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(6, 45))
+    assert len(at_alarm) == 0
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 0
+    assert len(at_alarm) == 1
+
+
+async def test_at_alarm_script_skipped_when_gated(env, freezer) -> None:
+    """Gated off at alarm time (away) → `at_alarm` does not fire."""
+    freezer.move_to(at(5, 0))
+    env.hass.states.async_set("person.me", "not_home")
+    at_alarm = async_mock_service(env.hass, "script", "at_alarm")
+    entry = env.make_entry(
+        person_entity="person.me", at_alarm_script="script.at_alarm"
+    )
+    coord = await env.build(entry, days=SAT)
+
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert len(at_alarm) == 0
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_at_alarm_script_fires_once_not_on_snooze_resume(
+    env, freezer
+) -> None:
+    """`at_alarm` fires once at the initial alarm, never on snooze resume."""
+    freezer.move_to(at(5, 0))
+    at_alarm = async_mock_service(env.hass, "script", "at_alarm")
+    entry = env.make_entry(at_alarm_script="script.at_alarm")
+    coord = await env.build(entry, days=SAT, snooze_min=4)
+
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 0), env.music)
+    assert len(at_alarm) == 1
+
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    env.music.block()
+    await fire_until_started(env.hass, freezer, at(7, 4), env.music)  # resume
+    assert coord.state == STATE_PLAYING
+    assert len(at_alarm) == 1  # not re-fired
+
+
+# --------------------------------------------------------------------------
 # teardown / unload (#35)
 # --------------------------------------------------------------------------
 

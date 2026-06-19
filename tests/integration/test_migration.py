@@ -27,7 +27,7 @@ DAY_OLD_NEW = [
 ]
 
 
-async def test_v1_migrates_to_v4_and_renames_day_switches(hass) -> None:
+async def test_v1_migrates_to_v5_and_renames_day_switches(hass) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SLUG: "test", CONF_NAME: "Test Alarm"},
@@ -46,7 +46,7 @@ async def test_v1_migrates_to_v4_and_renames_day_switches(hass) -> None:
         )
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.version == 4
+    assert entry.version == 5
 
     for old, new in DAY_OLD_NEW:
         # Old unique_id is gone; new one resolves to the renamed entity_id.
@@ -60,8 +60,8 @@ async def test_v1_migrates_to_v4_and_renames_day_switches(hass) -> None:
         )
 
 
-@pytest.mark.parametrize("version", [2, 3])
-async def test_v2_and_v3_bump_to_v4(hass, version: int) -> None:
+@pytest.mark.parametrize("version", [2, 3, 4])
+async def test_v2_v3_v4_bump_to_v5(hass, version: int) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SLUG: f"x{version}", CONF_NAME: "X"},
@@ -70,30 +70,30 @@ async def test_v2_and_v3_bump_to_v4(hass, version: int) -> None:
     )
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.version == 4
+    assert entry.version == 5
     # Additive steps don't touch stored data.
     assert entry.data[CONF_SLUG] == f"x{version}"
 
 
-async def test_v4_is_a_noop(hass) -> None:
+async def test_v5_is_a_noop(hass) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SLUG: "y", CONF_NAME: "Y"},
-        version=4,
+        version=5,
         unique_id="y",
     )
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.version == 4
+    assert entry.version == 5
 
 
 async def test_future_version_downgrade_guard_returns_false(hass) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_SLUG: "z", CONF_NAME: "Z"},
-        version=5,
+        version=6,
         unique_id="z",
     )
     entry.add_to_hass(hass)
     assert await async_migrate_entry(hass, entry) is False
-    assert entry.version == 5
+    assert entry.version == 6
