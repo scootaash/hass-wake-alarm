@@ -127,15 +127,25 @@ Two optional **script** hooks let you run your own automation around the
 alarm without baking it into the integration — a TTS greeting, a coffee
 machine, blinds, etc.
 
-- **Before** runs when the cycle begins: at ramp start, or at `alarm_time`
-  when there's no light ramp. It does not run if the alarm is gated off by
-  presence/condition.
+- **Before** runs when the wake-up sequence *begins* — at the ramp start,
+  i.e. `Length` minutes before `alarm_time`. That start point is the same
+  even for a music-only alarm (there are no lights to ramp, but the sequence
+  still begins then); it only runs at `alarm_time` itself after a restart
+  catch-up or if you enable the alarm mid-window. It does not run if the
+  alarm is gated off by presence/condition.
 - **After** runs when the cycle ends: music finishing on its own, a
-  dismiss, or an auto-dismiss. It does **not** run on snooze.
+  dismiss, or an auto-dismiss (a lights-only alarm runs it at `alarm_time`).
+  It does **not** run on snooze.
 
 Both fire non-blocking, so a slow or failing script can never delay the
 wake-up, and both receive the instance `slug` and `name` as script
 variables for context.
+
+> **There is no hook at `alarm_time` itself** (the moment the music starts).
+> In the normal ramped case `before` runs `Length` minutes earlier and
+> `after` runs at music-end — neither coincides with the set time. If you
+> want an action exactly at the wake moment, trigger an automation on
+> `sensor.<slug>_state` changing to `playing`.
 
 ### Snooze and Dismiss
 

@@ -23,7 +23,7 @@
           "person_entity": "If set, the alarm fires only when this person is home. Leave blank to fire regardless.",
           "notify_target_standard": "Mobile notification at alarm time, with Snooze and Dismiss buttons. Leave blank for no notification.",
           "notify_target_urgent": "Critical notification when speakers are unavailable or no media has been picked. Set to a different channel for a distinct sound.",
-          "before_script": "Runs once when the wake-up begins: at the light-ramp start, or — when there's no ramp (music-only) — at the alarm/music time. Fired non-blocking, so a slow or failing script never delays the alarm. The instance slug and name are passed as script variables.",
+          "before_script": "Runs once when the wake-up sequence begins — at the light-ramp start, i.e. 'Length' minutes before the alarm time. Same moment even for a music-only alarm (no lights, but the sequence still starts then); it only lands on the alarm time after a restart catch-up. Note: there is no hook at the alarm time itself. Fired non-blocking, so a slow or failing script never delays the alarm. The instance slug and name are passed as script variables.",
           "after_script": "Runs once when the wake-up ends: the music finishing on its own, a dismiss, or an auto-dismiss. A lights-only alarm (no music) runs it at the alarm time. Not run on snooze. Fired non-blocking; the slug and name are passed as variables."
         }
       }
@@ -62,7 +62,7 @@
           "condition_entity": "Skip the alarm unless this binary sensor is on (e.g. a bed sensor or the Workday sensor). ANDed with presence; leave blank to ignore.",
           "notify_target_standard": "Mobile notification at alarm time.",
           "notify_target_urgent": "Mobile notification when speakers are unavailable or no media has been picked.",
-          "before_script": "Runs (non-blocking) when the wake-up begins: at the light-ramp start, or at the alarm/music time when there's no ramp. Slug and name are passed as variables.",
+          "before_script": "Runs (non-blocking) when the wake-up sequence begins — at the light-ramp start, i.e. 'Length' minutes before the alarm time (same moment even for a music-only alarm). There is no hook at the alarm time itself. Slug and name are passed as variables.",
           "after_script": "Runs (non-blocking) when the wake-up ends: the music finishing, a dismiss, or an auto-dismiss (a lights-only alarm ends at the alarm time). Not run on snooze."
         }
       }
