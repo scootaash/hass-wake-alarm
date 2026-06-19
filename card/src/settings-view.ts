@@ -67,7 +67,7 @@ const SLIDERS: NumberSpec[] = [
   {
     key: "auto_dismiss_min",
     label: "Auto-dismiss (min)",
-    description: "Stop everything automatically after this long. 0 disables.",
+    description: "Stop everything this long after the music starts (the alarm time) — not the start of the light ramp. 0 disables.",
     min: 0, max: 120, step: 1,
   },
 ];
@@ -129,21 +129,36 @@ export class WakeAlarmSettingsView extends LitElement {
                 Test music
               </button>`
             : null}
-          <button
-            class="btn"
-            @click=${() => this._press("test_standard_notification")}
-            title="Send the standard alarm notification now"
-          >
-            Test standard notification
-          </button>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Notifications</div>
+          <div class="notif-item">
+            <button
+              class="btn"
+              @click=${() => this._press("test_standard_notification")}
+            >
+              Test standard notification
+            </button>
+            <div class="slider-desc">
+              Sends a mobile notification on this device at alarm time to allow
+              easy access to snooze.
+            </div>
+          </div>
           ${showMedia
-            ? html`<button
-                class="btn"
-                @click=${() => this._press("test_urgent_notification")}
-                title="Send the urgent (critical) notification now"
-              >
-                Test urgent notification
-              </button>`
+            ? html`<div class="notif-item">
+                <button
+                  class="btn"
+                  @click=${() => this._press("test_urgent_notification")}
+                >
+                  Test urgent notification
+                </button>
+                <div class="slider-desc">
+                  Sends an urgent mobile notification on this device when
+                  speakers are unavailable or no media has been picked, so you
+                  should still be woken up — although less pleasantly :-)
+                </div>
+              </div>`
             : null}
         </div>
 
@@ -356,6 +371,15 @@ export class WakeAlarmSettingsView extends LitElement {
         flex-direction: row;
         flex-wrap: wrap;
         gap: 8px;
+      }
+
+      .notif-item {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .notif-item .btn {
+        align-self: flex-start;
       }
 
       .slider-row {
