@@ -12,6 +12,7 @@
           "condition_entity": "Condition sensor (optional)",
           "notify_target_standard": "Standard notification target (optional)",
           "notify_target_urgent": "Urgent notification target (optional)",
+          "notify_tap_path": "Notification tap opens (optional)",
           "before_script": "Run script before the alarm (optional)",
           "at_alarm_script": "Run script at alarm time (optional)",
           "after_script": "Run script after the alarm (optional)"
@@ -24,6 +25,7 @@
           "person_entity": "If set, the alarm fires only when this person is home. Leave blank to fire regardless.",
           "notify_target_standard": "Mobile notification at alarm time, with Snooze and Dismiss buttons. Leave blank for no notification.",
           "notify_target_urgent": "Critical notification when speakers are unavailable or no media has been picked. Set to a different channel for a distinct sound.",
+          "notify_tap_path": "Optional. Tapping the notification opens this dashboard path (e.g. lovelace/0 or wake-alarm). Leave blank to do nothing. Snooze and Dismiss are always available by long-pressing the notification.",
           "before_script": "Runs once when the wake-up sequence begins — at the light-ramp start, i.e. 'Length' minutes before the alarm time. Same moment even for a music-only alarm (no lights, but the sequence still starts then); it only lands on the alarm time after a restart catch-up. Fired non-blocking, so a slow or failing script never delays the alarm. The instance slug and name are passed as script variables.",
           "at_alarm_script": "Runs once exactly at the alarm time — the moment the music starts (or, for a lights-only alarm, when the alarm fires). Skipped if the alarm is gated off by presence/condition. Fired non-blocking; the instance slug and name are passed as script variables.",
           "after_script": "Runs once when the wake-up ends: a dismiss or an auto-dismiss. A lights-only alarm (no music) runs it at the alarm time. Not run on snooze. Fired non-blocking; the slug and name are passed as variables."
@@ -54,6 +56,7 @@
           "condition_entity": "Condition sensor (optional)",
           "notify_target_standard": "Standard notification target (optional)",
           "notify_target_urgent": "Urgent notification target (optional)",
+          "notify_tap_path": "Notification tap opens (optional)",
           "before_script": "Run script before the alarm (optional)",
           "at_alarm_script": "Run script at alarm time (optional)",
           "after_script": "Run script after the alarm (optional)"
@@ -65,6 +68,7 @@
           "condition_entity": "Skip the alarm unless this binary sensor is on (e.g. a bed sensor or the Workday sensor). ANDed with presence; leave blank to ignore.",
           "notify_target_standard": "Mobile notification at alarm time.",
           "notify_target_urgent": "Mobile notification when speakers are unavailable or no media has been picked.",
+          "notify_tap_path": "Optional. Tapping the notification opens this dashboard path (e.g. lovelace/0 or wake-alarm). Leave blank to do nothing. Snooze and Dismiss are always available by long-pressing the notification.",
           "before_script": "Runs (non-blocking) when the wake-up sequence begins — at the light-ramp start, i.e. 'Length' minutes before the alarm time (same moment even for a music-only alarm). Slug and name are passed as variables.",
           "at_alarm_script": "Runs (non-blocking) exactly at the alarm time — when the music starts (or the alarm fires for a lights-only alarm). Skipped if gated off by presence/condition. Slug and name are passed as variables.",
           "after_script": "Runs (non-blocking) when the wake-up ends: a dismiss or an auto-dismiss (a lights-only alarm ends at the alarm time). Not run on snooze."

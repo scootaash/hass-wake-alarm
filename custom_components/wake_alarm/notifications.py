@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from ._pure import build_action_id, parse_action_id
 from .const import (
+    CONF_NOTIFY_TAP_PATH,
     CONF_NOTIFY_TARGET_STANDARD,
     CONF_NOTIFY_TARGET_URGENT,
 )
@@ -53,6 +54,24 @@ def _action_buttons(entry_id: str) -> list[dict]:
     ]
 
 
+def _normalize_path(raw: str | None) -> str | None:
+    """Normalise the configured notification tap target into a deep link.
+
+    Returns None when nothing is configured. A bare dashboard path
+    (``lovelace/0``) gets a leading slash so the companion app treats it as an
+    in-app navigation; an explicit scheme (``homeassistant://navigate/...``,
+    ``https://...``) or an already-absolute path is passed through untouched.
+    """
+    if not raw:
+        return None
+    path = raw.strip()
+    if not path:
+        return None
+    if "://" in path or path.startswith("/"):
+        return path
+    return f"/{path}"
+
+
 async def _send(
     coordinator: "WakeAlarmCoordinator",
     *,
@@ -71,6 +90,17 @@ async def _send(
     service = target.split(".", 1)[1]
 
     data: dict = {"actions": _action_buttons(coordinator.entry.entry_id)}
+
+    # Optional deep link: tapping the notification body opens this dashboard
+    # path. iOS uses `url`, Android uses `clickAction` — set both so one
+    # configured path works on either companion app.
+    tap_path = _normalize_path(
+        coordinator.entry.data.get(CONF_NOTIFY_TAP_PATH)
+    )
+    if tap_path:
+        data["url"] = tap_path
+        data["clickAction"] = tap_path
+
     if urgent:
         # iOS critical alert + Android urgent channel
         data["push"] = {

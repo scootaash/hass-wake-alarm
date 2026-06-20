@@ -25,6 +25,7 @@ CONF_AT_ALARM_SCRIPT = "at_alarm_script"
 CONF_AFTER_SCRIPT = "after_script"
 CONF_NOTIFY_TARGET_STANDARD = "notify_target_standard"
 CONF_NOTIFY_TARGET_URGENT = "notify_target_urgent"
+CONF_NOTIFY_TAP_PATH = "notify_tap_path"
 
 # Days of week. Each entry is (entity_key, translation_key).
 #
