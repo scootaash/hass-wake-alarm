@@ -137,9 +137,8 @@ machine, blinds, etc.
   (or, for a lights-only alarm, when the alarm fires). This is the hook for
   "do X the instant the alarm goes off". Skipped if the alarm is gated off by
   presence/condition.
-- **After** runs when the cycle ends: music finishing on its own, a
-  dismiss, or an auto-dismiss (a lights-only alarm runs it at `alarm_time`).
-  It does **not** run on snooze.
+- **After** runs when the cycle ends: a dismiss or an auto-dismiss (a
+  lights-only alarm runs it at `alarm_time`). It does **not** run on snooze.
 
 All three fire non-blocking, so a slow or failing script can never delay the
 wake-up, and each receives the instance `slug` and `name` as script
