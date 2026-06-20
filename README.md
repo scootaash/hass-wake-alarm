@@ -198,6 +198,16 @@ channel at HIGH importance so you can assign it a louder / more
 alarming sound than the standard channel. Both notifications carry the
 same Snooze + Dismiss action buttons.
 
+> **Revealing the buttons on iOS:** the Snooze / Dismiss buttons aren't
+> shown inline — long-press (or pull down) the notification to expand it.
+
+**Tap to open the card.** Set `notify_tap_path` (optional, in the wizard /
+options) to a dashboard path — e.g. `lovelace/0` or `wake-alarm` — and tapping
+the notification body opens that dashboard. A bare path gets a leading slash
+automatically; an explicit `homeassistant://navigate/...` deep link or a full
+URL is used as-is. Leave it blank to do nothing on tap. Sent as `url` (iOS) and
+`clickAction` (Android) so one value works on either companion app.
+
 Two **Test** buttons in the card's settings (Test standard
 notification, Test urgent notification) fire each path on demand so
 you can verify the sound and interruption-level on your actual device
