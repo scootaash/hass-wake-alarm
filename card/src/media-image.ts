@@ -19,6 +19,29 @@
  */
 import type { HomeAssistant } from "./types";
 
+/**
+ * Decide what <wake-alarm-thumb> should do with its current artwork, given the
+ * thumbnail it last resolved (`resolvedFor`):
+ *   - "resolve" — there's new artwork to sign;
+ *   - "clear"   — artwork was removed, drop the now-stale image;
+ *   - "none"    — nothing changed.
+ *
+ * The key property is that an unchanged thumbnail returns "none". `willUpdate`
+ * fires on every `hass` state update (many per second) with the same thumbnail;
+ * re-signing then blanked the <img> src and reloaded it on every tick — the
+ * thumbnail flicker/reload reported in #19 — besides flooding HA with one
+ * `auth/sign_path` call per tile per tick.
+ */
+export type ThumbnailAction = "resolve" | "clear" | "none";
+
+export function thumbnailAction(
+  thumbnail: string | null | undefined,
+  resolvedFor: string | null | undefined,
+): ThumbnailAction {
+  if (!thumbnail) return resolvedFor ? "clear" : "none";
+  return thumbnail === resolvedFor ? "none" : "resolve";
+}
+
 export async function resolveThumbnailUrl(
   hass: HomeAssistant,
   thumbnail: string,

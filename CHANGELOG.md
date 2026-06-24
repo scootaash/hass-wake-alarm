@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Media-picker thumbnails flickered / reloaded continuously (#19).** Each
+  thumbnail re-signed its artwork URL on every Home Assistant state update,
+  blanking the `<img>` and reloading it many times a second (and flooding HA
+  with one `auth/sign_path` call per tile per tick — noticeable on large Music
+  Assistant artist/album/track lists). Artwork is now signed once per tile and
+  only re-signed when the artwork itself changes.
+
 ## 0.5.0 — 2026-06-18
 
 Feature release: lights and media players are now independent (silent or
