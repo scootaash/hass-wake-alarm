@@ -30,7 +30,17 @@ settles — snooze and auto-dismiss are music-only and aren't armed.
 The card ships **inside the integration** and registers itself as a
 Lovelace resource at `/wake_alarm/wake-alarm-card.js`. There's no
 separate HACS Dashboard install or manual `Settings → Dashboards →
-Resources` step.
+Resources` step. Dashboards already open when you add your first alarm
+need one refresh before the card appears.
+
+If you keep Lovelace resources in YAML, the integration can't add
+itself; add it to your `resources:` (bump `?v=` when you update, so
+browsers fetch the new card):
+
+```yaml
+- url: /wake_alarm/wake-alarm-card.js?v=0.5.0
+  type: module
+```
 
 
 
