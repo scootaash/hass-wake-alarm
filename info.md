@@ -19,6 +19,11 @@ Lovelace card included.
 - **Multi-room playback** if your speakers advertise the
   `GROUPING` feature. Sonos tested, with the full UPnP quirks ironed
   out (unjoin → settle → join → volume-zero per member → shuffle → play).
+  A single alarm speaker is taken out of any group first, so the alarm
+  only plays in that room.
+- **Stays on until you deal with it**: Snooze and Dismiss stay available
+  while the music plays, and stopping the music on the speaker itself
+  ends the alarm too.
 - **Mobile notifications** with separate standard and urgent paths —
   iOS critical sound bypasses Do Not Disturb if the speaker fails to
   start.

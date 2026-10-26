@@ -20,7 +20,7 @@ re-explained each session.
 ## Architecture (integration)
 
 - `__init__.py` — `async_setup_entry` / `async_unload_entry`, the config-entry
-  migration (`async_migrate_entry`, **currently entry version 2**), and the
+  migration (`async_migrate_entry`, **currently entry version 6**), and the
   Lovelace card registration (`_async_register_card`, signs nothing — serves the
   static bundle and stores it as a Lovelace resource; `async_remove_entry` drops
   the resource with the last alarm). `add_extra_js_url` is only the fallback
