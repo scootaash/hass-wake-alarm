@@ -138,6 +138,29 @@ exactly like presence: checked twice, at ramp start and again at
 entity and a condition sensor are set they are **ANDed** — both have to
 pass. Leave it blank to skip the check.
 
+To gate on more than one sensor (say, a bed sensor *and* the Workday
+sensor), combine them in a **binary sensor group** and pick the group as
+the condition sensor. In the UI: **Settings → Devices & services →
+Helpers → Create helper → Group → Binary sensor group**, add both sensors
+and turn on **All entities**, so the group is only `on` when every member
+is. Or in YAML:
+
+```yaml
+binary_sensor:
+  - platform: group
+    name: In bed on a workday
+    unique_id: in_bed_on_a_workday
+    all: true
+    entities:
+      - binary_sensor.bed_occupancy
+      - binary_sensor.workday_sensor
+```
+
+A sensor that is `unavailable` or `unknown` doesn't count as `on`, and
+with **All entities** on, one offline member leaves the whole group
+`unknown`. Either way that phase is skipped, so if your bed sensor runs
+on batteries, a flat one means no alarm.
+
 ### Run a script before / at / after
 
 Three optional **script** hooks let you run your own automation around the
