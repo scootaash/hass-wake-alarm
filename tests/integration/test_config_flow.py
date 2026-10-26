@@ -27,6 +27,7 @@ from custom_components.wake_alarm.const import (
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
+    CONF_NOTIFY_TAP_PATH,
     CONF_NOTIFY_TARGET_STANDARD,
     CONF_NOTIFY_TARGET_URGENT,
     CONF_PERSON_ENTITY,
@@ -82,6 +83,7 @@ async def test_validate_input_drops_empty_optionals(hass) -> None:
             CONF_CONDITION_ENTITY: None,
             CONF_BEFORE_SCRIPT: "",
             CONF_NOTIFY_TARGET_STANDARD: "  ",
+            CONF_NOTIFY_TAP_PATH: "  ",
         },
         require_name=True,
     )
@@ -91,8 +93,24 @@ async def test_validate_input_drops_empty_optionals(hass) -> None:
         CONF_CONDITION_ENTITY,
         CONF_BEFORE_SCRIPT,
         CONF_NOTIFY_TARGET_STANDARD,
+        CONF_NOTIFY_TAP_PATH,
     ):
         assert k not in data
+
+
+async def test_validate_input_stores_notify_tap_path(hass) -> None:
+    errors, _ph, data = _validate_input(
+        hass,
+        {
+            CONF_NAME: "Test",
+            CONF_LIGHT_ENTITIES: ["light.x"],
+            CONF_NOTIFY_TAP_PATH: "  lovelace/0  ",
+        },
+        require_name=True,
+    )
+    assert errors == {}
+    # Stored verbatim (trimmed); normalisation happens at send time.
+    assert data[CONF_NOTIFY_TAP_PATH] == "lovelace/0"
 
 
 # -------------------- _validate_players --------------------
@@ -189,8 +207,9 @@ async def test_options_flow_drops_cleared_optional_fields(hass) -> None:
             CONF_AFTER_SCRIPT: "script.after",
             CONF_NOTIFY_TARGET_STANDARD: "notify.mobile",
             CONF_NOTIFY_TARGET_URGENT: "notify.mobile",
+            CONF_NOTIFY_TAP_PATH: "lovelace/0",
         },
-        version=5,
+        version=6,
         unique_id="test",
     )
     entry.add_to_hass(hass)
@@ -217,6 +236,7 @@ async def test_options_flow_drops_cleared_optional_fields(hass) -> None:
         CONF_AFTER_SCRIPT,
         CONF_NOTIFY_TARGET_STANDARD,
         CONF_NOTIFY_TARGET_URGENT,
+        CONF_NOTIFY_TAP_PATH,
     ):
         assert k not in data
     # Immutable identity fields preserved.

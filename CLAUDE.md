@@ -20,7 +20,11 @@ re-explained each session.
 - `__init__.py` — `async_setup_entry` / `async_unload_entry`, the config-entry
   migration (`async_migrate_entry`, **currently entry version 2**), and the
   Lovelace card registration (`_async_register_card`, signs nothing — serves the
-  static bundle + `add_extra_js_url`).
+  static bundle and stores it as a Lovelace resource; `async_remove_entry` drops
+  the resource with the last alarm). `add_extra_js_url` is only the fallback
+  when no resource can be written (YAML resource mode): page-injected modules
+  run before HA's app swaps in its polyfilled `window.customElements`, which
+  hides the card from HA ("Custom element doesn't exist"). Never use both.
 - `coordinator.py` — the heart: the alarm **state machine** and scheduling.
   Arms timers via `async_track_point_in_time`, fires the light ramp at
   `alarm_time − length`, music at `alarm_time`, handles snooze / dismiss /
@@ -69,12 +73,13 @@ When adding fields to config-entry **data**, bump the entry version and extend
     patched runners + notifications, `async_mock_service`) and the
     `card_frontend` fixture (the real `frontend` component can't load under PHACC
     — `hass_frontend` isn't installed — so it stubs `http` + the
-    `add_extra_js_url` data store).
+    `add_extra_js_url` data store) and `lovelace_resources` (the real `lovelace`
+    component, which does load; seed `hass_storage["lovelace_resources"]` first).
   - `tests/integration/test_setup.py` — full config-entry setup/unload smoke
     test (`skipif` below HA 2024.4, where `config_flow`'s `ConfigFlowResult`
     import fails).
-  - `tests/integration/test_card_registration.py` — card static-route + version
-    signing regression tests.
+  - `tests/integration/test_card_registration.py` — card static-route, version
+    signing and Lovelace-resource regression tests.
   - `tests/integration/test_schedule.py` / `test_light_ramp.py` — `_pure` math.
 - `pyproject.toml`: `asyncio_mode = "auto"`; warnings are surfaced, not errors
   (the HA matrix emits version-specific deprecations). Coverage is reported

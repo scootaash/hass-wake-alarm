@@ -729,17 +729,25 @@ class WakeAlarmCoordinator:
             raise
         except Exception:  # noqa: BLE001
             _LOGGER.exception("music for %s failed", self.slug)
-        finally:
-            self._music_task = None
-            self._music_cancel_event = None
-            # Reaching here in PLAYING means the sequence ended naturally (a
-            # snooze/dismiss would have moved us out of PLAYING first). For a
-            # real alarm that's the end of the occurrence → run the
-            # after-script. Test-music (is_alarm=False) never does.
+            # Hard failure mid-sequence: settle so we don't strand PLAYING in
+            # silence. The common unavailable-players / no-media cases are
+            # caught pre-flight in _fire_music before music ever starts, so
+            # this only covers an unexpected mid-sequence error. For a real
+            # alarm that's the end of the occurrence → run the after-script.
             if self._state == STATE_PLAYING:
                 self._set_state(end_state)
                 if is_alarm:
                     self._finish_cycle()
+        finally:
+            self._music_task = None
+            self._music_cancel_event = None
+            # NB: completing the fade does NOT end the occurrence. The media
+            # player keeps playing on its own, so the coordinator stays in
+            # PLAYING (keeping the card's snooze/dismiss buttons visible and
+            # auto-dismiss armed) until the user snoozes/dismisses or the
+            # auto-dismiss timer fires. A snooze/dismiss moves the state out of
+            # PLAYING and cancels the music task before reaching here, so the
+            # leftover `end_state` from a natural fade is intentionally unused.
 
     # -------------------- snooze + dismiss --------------------
 
@@ -1077,9 +1085,11 @@ class WakeAlarmCoordinator:
     def _finish_cycle(self) -> None:
         """End an alarm occurrence and fire the after-script once.
 
-        Fired on every terminal outcome — music finishing naturally, dismiss,
-        auto-dismiss, or a no-music settle (lights-only / players unavailable /
-        no media). Snooze keeps the cycle active, so it never fires here.
+        Fired on every terminal outcome — a dismiss, an auto-dismiss, or a
+        no-music settle (lights-only / players unavailable / no media). Music
+        playing does not end the cycle on its own (the player keeps playing
+        until dismissed), so the after-script waits for the dismiss. Snooze
+        keeps the cycle active, so it never fires here.
         """
         if not self._cycle_active:
             return

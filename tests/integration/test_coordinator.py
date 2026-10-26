@@ -67,7 +67,7 @@ async def fire_until_started(hass, freezer, when: datetime, runner) -> None:
 
 
 async def test_normal_cycle(env, freezer) -> None:
-    """arm → ramp → alarm → music → settle IDLE → roll forward."""
+    """arm → ramp → alarm → music (keeps playing) → dismiss → roll forward."""
     freezer.move_to(at(5, 0))
     entry = env.make_entry()
     coord = await env.build(entry, days=SAT)
@@ -94,11 +94,21 @@ async def test_normal_cycle(env, freezer) -> None:
     assert coord.state == STATE_PLAYING
     assert env.music.calls == 1
 
+    # The fade-in completes, but the player keeps playing on its own, so the
+    # alarm stays PLAYING (snooze/dismiss stay available, auto-dismiss stays
+    # armed) rather than silently settling to IDLE.
     env.music.release()
     await env.hass.async_block_till_done()
     assert env.send_standard.await_count == 1
+    assert coord.state == STATE_PLAYING
+    # Schedule already rolled to the next enabled day when the alarm fired.
+    assert coord.next_fire == NEXT_WEEK
+    assert env.ramp.calls == 1
+
+    # Dismiss ends the occurrence and settles to IDLE; ramp never restarted.
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
     assert coord.state == STATE_IDLE
-    # Schedule rolled to the next enabled day; ramp never restarted.
     assert coord.next_fire == NEXT_WEEK
     assert env.ramp.calls == 1
 
@@ -154,6 +164,10 @@ async def test_empty_light_list_still_plays_music(env, freezer) -> None:
     assert env.music.calls == 1
     env.music.release()
     await env.hass.async_block_till_done()
+    # Fade done but still playing; dismiss to end the occurrence.
+    assert coord.state == STATE_PLAYING
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
     assert coord.state == STATE_IDLE
     assert coord.next_fire == NEXT_WEEK
 
@@ -167,6 +181,10 @@ async def test_zero_length_ramp_and_alarm_coincide(env, freezer) -> None:
     await fire(env.hass, freezer, at(7, 0))
     await env.hass.async_block_till_done()
     assert env.music.calls == 1
+    # Music plays on after the fade; dismiss settles to IDLE.
+    assert coord.state == STATE_PLAYING
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
     assert coord.state == STATE_IDLE
     assert coord.next_fire == NEXT_WEEK
 
@@ -473,6 +491,88 @@ async def test_auto_dismiss_fires_during_snooze(env, freezer) -> None:
     assert coord.next_fire == NEXT_WEEK
 
 
+async def test_music_stays_active_after_fade_completes(env, freezer) -> None:
+    """Regression: the fade-in finishing is NOT the end of the occurrence.
+
+    The media player keeps playing on its own, so the coordinator must stay
+    PLAYING (keeping the card's snooze/dismiss buttons visible and auto-dismiss
+    armed) instead of silently settling to IDLE while music plays on.
+    """
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+
+    # Music runner left un-blocked: the sequence runs to completion (the fade
+    # finishes) exactly as it does in production.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert env.music.calls == 1
+    # Still playing even though the fade is done.
+    assert coord.state == STATE_PLAYING
+    assert coord.is_active is True
+    # No media_stop — the alarm is genuinely still sounding.
+    assert len(env.media_calls["media_stop"]) == 0
+
+
+async def test_auto_dismiss_stops_music_after_configured_minutes(
+    env, freezer
+) -> None:
+    """Regression: a 10-min auto-dismiss actually stops the music 10 min after
+    the fade completes, rather than leaving it playing indefinitely."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(
+        env.make_entry(), days=SAT, auto_dismiss_min=10
+    )
+
+    # Fade runs to completion; the alarm stays PLAYING with the timer armed.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_PLAYING
+    assert coord._auto_dismiss_deadline == at(7, 10)
+
+    # Before the deadline: still playing, music not stopped.
+    await fire(env.hass, freezer, at(7, 9))
+    assert coord.state == STATE_PLAYING
+    assert len(env.media_calls["media_stop"]) == 0
+
+    # At the deadline auto-dismiss stops the music and settles.
+    await fire(env.hass, freezer, at(7, 10))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    assert len(env.media_calls["media_stop"]) == 1
+    assert coord.next_fire == NEXT_WEEK
+
+
+async def test_snooze_and_dismiss_work_after_fade_completes(
+    env, freezer
+) -> None:
+    """The buttons must work once the fade is done and the music task is gone
+    (the realistic case: the user reaches for snooze/dismiss while it plays)."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT, snooze_min=5)
+
+    # Let the fade run to completion — the music task ends, state stays PLAYING.
+    await fire(env.hass, freezer, at(7, 0))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_PLAYING
+
+    # Snooze still works (no live music task to cancel).
+    await coord.async_snooze()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_SNOOZING
+
+    # Resume re-runs the music sequence and settles back to PLAYING.
+    await fire(env.hass, freezer, at(7, 5))
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_PLAYING
+    assert env.music.calls == 2
+
+    # And dismiss ends the occurrence, stopping the player.
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_IDLE
+    assert len(env.media_calls["media_stop"]) == 1
+
+
 async def test_dismiss_during_ramp_skips_today(env, freezer) -> None:
     """Dismiss before alarm_time rolls past today; the alarm never fires."""
     freezer.move_to(at(5, 0))
@@ -549,7 +649,7 @@ async def test_no_media_selected_sends_notice_and_settles(
 
 
 async def test_before_at_ramp_after_on_music_end(env, freezer) -> None:
-    """Before fires at ramp-start; after fires when music finishes naturally."""
+    """Before fires at ramp-start; after fires when the occurrence ends (dismiss)."""
     freezer.move_to(at(5, 0))
     before = async_mock_service(env.hass, "script", "before")
     after = async_mock_service(env.hass, "script", "after")
@@ -569,6 +669,13 @@ async def test_before_at_ramp_after_on_music_end(env, freezer) -> None:
     await fire(env.hass, freezer, at(7, 0))
     await env.hass.async_block_till_done()
     assert env.music.calls == 1
+    # Music plays on after the fade — the occurrence isn't over yet.
+    assert coord.state == STATE_PLAYING
+    assert len(after) == 0
+
+    # The after-script fires when the occurrence actually ends (dismiss).
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
     assert len(after) == 1
     assert len(before) == 1  # before fires once per occurrence
     assert coord.state == STATE_IDLE
@@ -708,7 +815,7 @@ async def test_at_alarm_script_fires_at_alarm_time(env, freezer) -> None:
         at_alarm_script="script.at_alarm",
         after_script="script.after",
     )
-    await env.build(entry, days=SAT)
+    coord = await env.build(entry, days=SAT)
 
     await fire(env.hass, freezer, at(6, 45))  # ramp start
     assert len(before) == 1
@@ -720,6 +827,11 @@ async def test_at_alarm_script_fires_at_alarm_time(env, freezer) -> None:
     assert at_alarm[0].data.get("slug") == "test"
     assert at_alarm[0].data.get("name") == "Test Alarm"
     assert env.music.calls == 1
+    # `after` fires when the occurrence ends (dismiss), not at alarm time.
+    assert len(after) == 0
+
+    await coord.async_dismiss()
+    await env.hass.async_block_till_done()
     assert len(after) == 1
 
 
@@ -876,6 +988,13 @@ async def test_setting_change_during_playback_no_same_day_refire(
     assert coord._recompute_pending is True
 
     env.music.release()
+    await env.hass.async_block_till_done()
+    # Fade done but still playing — the deferred change isn't applied yet.
+    assert coord.state == STATE_PLAYING
+    assert coord._recompute_pending is True
+
+    # Dismiss settles to IDLE, which applies the deferred change.
+    await coord.async_dismiss()
     await env.hass.async_block_till_done()
     assert coord.state == STATE_IDLE
     # Now applied: next week at the new time, today skipped.

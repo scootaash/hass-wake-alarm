@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
@@ -30,6 +32,11 @@ _CARD_PATH = Path(__file__).parent / "www" / "wake-alarm-card.js"
 # Bookkeeping key inside hass.data[DOMAIN]; underscore-prefixed so the
 # entry-id lookup ignores it.
 _CARD_REGISTERED_KEY = "_card_registered"
+
+# hass.data key of the lovelace component. Read by string rather than imported
+# because its value changed shape across our supported range (a plain dict on
+# the 2024.6 floor, a LovelaceData dataclass on current cores).
+_LOVELACE_DATA = "lovelace"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -71,6 +78,31 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the card's Lovelace resource when the last alarm is deleted.
+
+    Otherwise an uninstalled integration leaves a resource that 404s on every
+    dashboard load. The removed entry is still listed while this runs.
+    """
+    if any(
+        other.entry_id != entry.entry_id
+        for other in hass.config_entries.async_entries(DOMAIN)
+    ):
+        return
+    resources = _lovelace_resources(hass)
+    if resources is None or not _resources_writable(resources):
+        return
+    try:
+        await _async_load_resources(resources)
+        for item in list(resources.async_items()):
+            if _is_card_resource(item):
+                await resources.async_delete_item(item["id"])
+    except Exception:  # cleanup must never block the removal
+        _LOGGER.warning(
+            "could not remove the wake-alarm-card Lovelace resource", exc_info=True
+        )
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload entry when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
@@ -96,8 +128,12 @@ async def async_migrate_entry(
 
     v4 → v5: added the optional at-alarm script hook. Additive optional field;
     this step only advances the version.
+
+    v5 → v6: added the optional notification tap path (deep-link the
+    notification to a dashboard). Additive optional field — absence of the key
+    means tapping does nothing — so this step only advances the version.
     """
-    if entry.version > 5:
+    if entry.version > 6:
         _LOGGER.error(
             "wake_alarm config entry %s is at version %s, cannot downgrade",
             entry.title,
@@ -140,6 +176,9 @@ async def async_migrate_entry(
     if entry.version == 4:
         hass.config_entries.async_update_entry(entry, version=5)
 
+    if entry.version == 5:
+        hass.config_entries.async_update_entry(entry, version=6)
+
     return True
 
 
@@ -164,6 +203,10 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     The URL we register with the frontend includes a ?v=<integration version>
     cache-bust suffix; the static path itself remains version-less, so
     browsers reliably fetch a fresh bundle when the integration is updated.
+
+    The bundle is loaded as a Lovelace resource (see
+    _async_ensure_lovelace_resource for why). add_extra_js_url is only the
+    fallback for when that isn't possible, and never used alongside it.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(_CARD_REGISTERED_KEY):
@@ -203,8 +246,109 @@ async def _async_register_card(hass: HomeAssistant) -> None:
 
         version = await _async_card_version(hass)
         versioned_url = f"{_CARD_PATH_PART}?v={version}"
-        add_extra_js_url(hass, versioned_url)
+        # Never raises: a failure here must not roll back the flag after the
+        # static route exists, or the next entry re-registers it (#19).
+        if not await _async_ensure_lovelace_resource(hass, versioned_url):
+            add_extra_js_url(hass, versioned_url)
     except Exception:
         domain_data[_CARD_REGISTERED_KEY] = False
         raise
     _LOGGER.info("registered wake-alarm-card at %s", versioned_url)
+
+
+def _is_card_resource(item: dict[str, Any]) -> bool:
+    """True for a Lovelace resource pointing at our bundle, any version.
+
+    Matches on path so a stale ?v=, or a copy the user added by hand, is updated
+    in place rather than duplicated.
+    """
+    return urlsplit(str(item.get("url", ""))).path == _CARD_PATH_PART
+
+
+def _lovelace_resources(hass: HomeAssistant) -> Any | None:
+    """Return the Lovelace resource collection, or None if lovelace isn't loaded.
+
+    In YAML resource mode this is a read-only collection; see
+    _resources_writable.
+    """
+    lovelace = hass.data.get(_LOVELACE_DATA)
+    if lovelace is None:
+        return None
+    if isinstance(lovelace, dict):
+        return lovelace.get("resources")
+    return getattr(lovelace, "resources", None)
+
+
+def _resources_writable(resources: Any) -> bool:
+    """False for YAML resource mode, whose collection has no create/delete."""
+    return hasattr(resources, "async_create_item")
+
+
+async def _async_load_resources(resources: Any) -> None:
+    """Load the resource collection from storage if nothing has yet.
+
+    The collection loads lazily, and until recent cores its create/delete don't
+    load it first: creating into an unloaded collection saves over the user's
+    stored resources (and async_items() would miss an existing copy of ours).
+    Mirrors HA's own guard.
+    """
+    if not resources.loaded:
+        await resources.async_load()
+        resources.loaded = True
+
+
+async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> bool:
+    """Make the card bundle a Lovelace resource. True if it now is one.
+
+    Why not add_extra_js_url: that injects the bundle into the page HTML, where
+    it races HA's own app script. The app installs a polyfilled
+    window.customElements registry as it starts (unconditionally, in at least
+    the 2026.2 and 2026.10 frontends); anything defined in the native registry
+    before that is invisible to HA's customElements.get(), so the dashboard
+    shows "Custom element doesn't exist: wake-alarm-card" even though the
+    bundle ran. Our 53 KB bundle usually wins that race. Lovelace resources are
+    loaded by the dashboard itself, after the app is up, so they define into
+    the right registry.
+
+    A stored resource also survives restarts: a dashboard opened while HA is
+    still starting (before this integration has set up) still gets the URL, and
+    the browser serves the versioned bundle from its HTTP cache.
+
+    YAML resource mode is read-only: True only if the user already lists our
+    bundle there.
+    """
+    resources = _lovelace_resources(hass)
+    if resources is None:
+        return False
+    try:
+        if not _resources_writable(resources):
+            if any(_is_card_resource(item) for item in resources.async_items() or []):
+                return True
+            _LOGGER.warning(
+                "Lovelace resources are in YAML mode, so wake-alarm-card can't "
+                "add itself; it may show as \"Custom element doesn't exist\". "
+                "Add this to your Lovelace resources: url: %s, type: module",
+                url,
+            )
+            return False
+        await _async_load_resources(resources)
+        ours = [item for item in resources.async_items() if _is_card_resource(item)]
+        if not ours:
+            await resources.async_create_item({"res_type": "module", "url": url})
+            return True
+        first, *duplicates = ours
+        if first.get("url") != url or first.get("type") != "module":
+            await resources.async_update_item(
+                first["id"], {"res_type": "module", "url": url}
+            )
+        # A second URL for the bundle evaluates it twice; the second copy's
+        # define() then throws.
+        for item in duplicates:
+            await resources.async_delete_item(item["id"])
+    except Exception:  # the caller falls back to add_extra_js_url
+        _LOGGER.warning(
+            "could not register wake-alarm-card as a Lovelace resource",
+            exc_info=True,
+        )
+        return False
+    return True

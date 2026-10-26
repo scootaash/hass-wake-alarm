@@ -29,6 +29,7 @@ from .const import (
     CONF_CONDITION_ENTITY,
     CONF_LIGHT_ENTITIES,
     CONF_MEDIA_PLAYER_ENTITIES,
+    CONF_NOTIFY_TAP_PATH,
     CONF_NOTIFY_TARGET_STANDARD,
     CONF_NOTIFY_TARGET_URGENT,
     CONF_PERSON_ENTITY,
@@ -171,6 +172,15 @@ def _build_schema(
         )
     ] = notify
 
+    fields[
+        vol.Optional(
+            CONF_NOTIFY_TAP_PATH,
+            description={
+                "suggested_value": defaults.get(CONF_NOTIFY_TAP_PATH, "")
+            },
+        )
+    ] = str
+
     for key in (CONF_BEFORE_SCRIPT, CONF_AT_ALARM_SCRIPT, CONF_AFTER_SCRIPT):
         fields[
             vol.Optional(
@@ -239,7 +249,11 @@ def _validate_input(
         if script:
             data[key] = script
 
-    for k in (CONF_NOTIFY_TARGET_STANDARD, CONF_NOTIFY_TARGET_URGENT):
+    for k in (
+        CONF_NOTIFY_TARGET_STANDARD,
+        CONF_NOTIFY_TARGET_URGENT,
+        CONF_NOTIFY_TAP_PATH,
+    ):
         v = (user_input.get(k) or "").strip()
         if v:
             data[k] = v
@@ -250,7 +264,7 @@ def _validate_input(
 class WakeAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Single-screen create flow."""
 
-    VERSION = 5
+    VERSION = 6
 
     @staticmethod
     @callback
@@ -314,6 +328,7 @@ class WakeAlarmOptionsFlow(OptionsFlow):
                     CONF_AFTER_SCRIPT,
                     CONF_NOTIFY_TARGET_STANDARD,
                     CONF_NOTIFY_TARGET_URGENT,
+                    CONF_NOTIFY_TAP_PATH,
                 ):
                     if k not in new_data:
                         merged.pop(k, None)

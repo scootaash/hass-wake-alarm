@@ -231,6 +231,24 @@ async def card_frontend(hass):
 
 
 @pytest.fixture
+async def lovelace_resources(hass, card_frontend):
+    """The real lovelace component in storage mode; returns its resource collection.
+
+    Unlike ``frontend``, lovelace sets up fine under PHACC. The collection loads
+    lazily, so a test can seed ``hass_storage["lovelace_resources"]`` before its
+    first use to start from existing user resources.
+    """
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "lovelace", {})
+    lovelace = hass.data["lovelace"]
+    # A plain dict on the 2024.6 floor, a LovelaceData dataclass on current cores.
+    if isinstance(lovelace, dict):
+        return lovelace["resources"]
+    return lovelace.resources
+
+
+@pytest.fixture
 async def env(hass):
     """Coordinator test harness: patched runners/notifications + builders."""
     await _force_utc(hass)

@@ -30,7 +30,17 @@ settles — snooze and auto-dismiss are music-only and aren't armed.
 The card ships **inside the integration** and registers itself as a
 Lovelace resource at `/wake_alarm/wake-alarm-card.js`. There's no
 separate HACS Dashboard install or manual `Settings → Dashboards →
-Resources` step.
+Resources` step. Dashboards already open when you add your first alarm
+need one refresh before the card appears.
+
+If you keep Lovelace resources in YAML, the integration can't add
+itself; add it to your `resources:` (bump `?v=` when you update, so
+browsers fetch the new card):
+
+```yaml
+- url: /wake_alarm/wake-alarm-card.js?v=0.5.0
+  type: module
+```
 
 
 
@@ -137,9 +147,8 @@ machine, blinds, etc.
   (or, for a lights-only alarm, when the alarm fires). This is the hook for
   "do X the instant the alarm goes off". Skipped if the alarm is gated off by
   presence/condition.
-- **After** runs when the cycle ends: music finishing on its own, a
-  dismiss, or an auto-dismiss (a lights-only alarm runs it at `alarm_time`).
-  It does **not** run on snooze.
+- **After** runs when the cycle ends: a dismiss or an auto-dismiss (a
+  lights-only alarm runs it at `alarm_time`). It does **not** run on snooze.
 
 All three fire non-blocking, so a slow or failing script can never delay the
 wake-up, and each receives the instance `slug` and `name` as script
@@ -198,6 +207,16 @@ even on a muted phone. Android uses the separate `wake_alarm_urgent`
 channel at HIGH importance so you can assign it a louder / more
 alarming sound than the standard channel. Both notifications carry the
 same Snooze + Dismiss action buttons.
+
+> **Revealing the buttons on iOS:** the Snooze / Dismiss buttons aren't
+> shown inline — long-press (or pull down) the notification to expand it.
+
+**Tap to open the card.** Set `notify_tap_path` (optional, in the wizard /
+options) to a dashboard path — e.g. `lovelace/0` or `wake-alarm` — and tapping
+the notification body opens that dashboard. A bare path gets a leading slash
+automatically; an explicit `homeassistant://navigate/...` deep link or a full
+URL is used as-is. Leave it blank to do nothing on tap. Sent as `url` (iOS) and
+`clickAction` (Android) so one value works on either companion app.
 
 Two **Test** buttons in the card's settings (Test standard
 notification, Test urgent notification) fire each path on demand so
