@@ -5,11 +5,16 @@ Two paths, ported from scripts.alarm_post_action_music in the legacy YAML.
 Single player (or multi-player without GROUPING — the config flow blocks
 the latter, but defensive):
 
-    1. volume_set 0 on all configured players
-    2. shuffle_set true on each (so a playlist doesn't always start on track 1)
-    3. media_player.play_media on each
-    4. settle, then a random 1–4 track skip on each (inaudible at volume 0)
-    5. linear fade 0 → target_volume across `music_fade_sec` seconds in
+    1. media_player.unjoin on each GROUPING-capable player, then a 3-second
+       wait (UPnP Error 800 mitigation, as below). Sonos routes play_media,
+       shuffle and next-track to the group coordinator but volume to the
+       speaker itself, so a speaker left in a group would start the alarm in
+       every grouped room at that room's volume, with only this one fading.
+    2. volume_set 0 on all configured players
+    3. shuffle_set true on each (so a playlist doesn't always start on track 1)
+    4. media_player.play_media on each
+    5. settle, then a random 1–4 track skip on each (inaudible at volume 0)
+    6. linear fade 0 → target_volume across `music_fade_sec` seconds in
        `_FADE_STEPS` steps
 
 Multi-player Sonos / GROUPING-capable:
@@ -139,6 +144,19 @@ async def _run_single_player(
     fade_sec: int,
     cancel_event: asyncio.Event,
 ) -> None:
+    # Take the speaker out of any group first (see module docstring). Runs on
+    # snooze resumes too: someone may have regrouped it during the snooze.
+    groupable = [p for p in players if _supports_grouping(coordinator, p)]
+    if groupable:
+        await asyncio.gather(
+            *(
+                _safe_call(coordinator, "unjoin", {"entity_id": p}, blocking=True)
+                for p in groupable
+            )
+        )
+        if await _interruptible_sleep(_UNJOIN_SETTLE_SEC, cancel_event):
+            return
+
     await asyncio.gather(*(_volume_set(coordinator, p, 0.0) for p in players))
     if cancel_event.is_set():
         return
@@ -369,14 +387,15 @@ async def _interruptible_sleep(
         return False
 
 
+def _supports_grouping(coordinator: "WakeAlarmCoordinator", entity_id: str) -> bool:
+    st = coordinator.hass.states.get(entity_id)
+    if st is None:
+        return False
+    features = int(st.attributes.get("supported_features", 0) or 0)
+    return bool(features & MediaPlayerEntityFeature.GROUPING)
+
+
 def _all_support_grouping(
     coordinator: "WakeAlarmCoordinator", entity_ids: list[str]
 ) -> bool:
-    for ent in entity_ids:
-        st = coordinator.hass.states.get(ent)
-        if st is None:
-            return False
-        features = int(st.attributes.get("supported_features", 0) or 0)
-        if not (features & MediaPlayerEntityFeature.GROUPING):
-            return False
-    return True
+    return all(_supports_grouping(coordinator, ent) for ent in entity_ids)

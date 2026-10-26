@@ -1,8 +1,12 @@
-"""Music-sequence resilience tests (#45).
+"""Music-sequence tests.
 
-A player going unavailable mid-sequence (raising on a media_player service
-call) must not abort the whole sequence or strand the rest. The sequence
-routes its calls through ``_safe_call``, which logs and continues.
+Resilience (#45): a player going unavailable mid-sequence (raising on a
+media_player service call) must not abort the whole sequence or strand the
+rest. The sequence routes its calls through ``_safe_call``, which logs and
+continues.
+
+Grouping: a single grouping-capable speaker is taken out of any group before
+it plays, otherwise Sonos plays the alarm in every grouped room.
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import async_mock_service
 
@@ -141,3 +146,97 @@ async def test_single_player_skip_cancels_cleanly(hass) -> None:
     # Must return promptly without raising.
     await async_run_music_sequence(coord, cancel)
     await hass.async_block_till_done()
+
+
+_GROUPING = {"supported_features": int(MediaPlayerEntityFeature.GROUPING)}
+
+
+def _record_calls(hass, *, fail: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """Register every media_player service the sequence uses; record the
+    (service, entity_id) of each call in order. Services in ``fail`` raise."""
+    calls: list[tuple[str, str]] = []
+
+    def make(service: str):
+        async def handler(call) -> None:
+            calls.append((service, call.data["entity_id"]))
+            if service in fail:
+                raise HomeAssistantError(f"{service} failed")
+
+        return handler
+
+    for service in (
+        "unjoin",
+        "volume_set",
+        "shuffle_set",
+        "play_media",
+        "media_next_track",
+    ):
+        hass.services.async_register("media_player", service, make(service))
+    return calls
+
+
+async def test_single_grouped_speaker_leaves_group_before_playing(hass) -> None:
+    """Sonos sends play_media to the group coordinator but volume to the
+    speaker, so a grouped bedroom speaker played the alarm in every grouped
+    room, with only the bedroom fading in. Unjoin it before anything else."""
+    player = "media_player.bedroom"
+    hass.states.async_set(player, "playing", _GROUPING)
+    calls = _record_calls(hass)
+
+    await async_run_music_sequence(FakeCoordinator(hass, [player]), asyncio.Event())
+    await hass.async_block_till_done()
+
+    assert calls[0] == ("unjoin", player)
+    assert [c for c in calls if c[0] == "unjoin"] == [("unjoin", player)]
+    assert ("play_media", player) in calls
+
+
+async def test_single_speaker_without_grouping_is_not_unjoined(hass) -> None:
+    """Players that can't group (e.g. a Google speaker) are left alone."""
+    player = "media_player.kitchen_google"
+    hass.states.async_set(player, "idle")  # no GROUPING feature
+    calls = _record_calls(hass)
+
+    await async_run_music_sequence(FakeCoordinator(hass, [player]), asyncio.Event())
+    await hass.async_block_till_done()
+
+    assert "unjoin" not in [service for service, _ in calls]
+    assert ("play_media", player) in calls
+
+
+async def test_dismiss_during_unjoin_settle_does_not_play(hass) -> None:
+    """A dismiss/snooze landing in the post-unjoin wait stops the sequence."""
+    player = "media_player.bedroom"
+    hass.states.async_set(player, "playing", _GROUPING)
+    cancel = asyncio.Event()
+    calls: list[str] = []
+
+    async def unjoin(call) -> None:
+        calls.append("unjoin")
+        cancel.set()  # the user dismisses while the speaker leaves its group
+
+    async def other(call) -> None:
+        calls.append(call.service)
+
+    hass.services.async_register("media_player", "unjoin", unjoin)
+    for service in ("volume_set", "shuffle_set", "play_media", "media_next_track"):
+        hass.services.async_register("media_player", service, other)
+
+    await async_run_music_sequence(FakeCoordinator(hass, [player]), cancel)
+    await hass.async_block_till_done()
+
+    assert calls == ["unjoin"]
+
+
+async def test_failed_unjoin_still_plays_the_alarm(hass) -> None:
+    """If the speaker won't leave its group, still wake the user: playing in
+    extra rooms beats not sounding the alarm at all."""
+    player = "media_player.bedroom"
+    hass.states.async_set(player, "playing", _GROUPING)
+    calls = _record_calls(hass, fail=("unjoin",))
+
+    await async_run_music_sequence(FakeCoordinator(hass, [player]), asyncio.Event())
+    await hass.async_block_till_done()
+
+    assert calls[0] == ("unjoin", player)
+    assert ("play_media", player) in calls
