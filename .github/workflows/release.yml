@@ -1,0 +1,124 @@
+name: Release
+
+# Run by hand from the Actions tab: Release → Run workflow, enter the version.
+#
+# Sets the version everywhere (scripts/set_version.py), rebuilds the card,
+# runs the checks, commits "Release X.Y.Z" to main, tags that commit and
+# publishes the GitHub release. HACS installs from releases, so this is what
+# reaches users.
+#
+# The manifest version is the card's browser cache-bust
+# (/wake_alarm/wake-alarm-card.js?v=X.Y.Z): tagging a commit whose manifest
+# still names the previous version leaves browsers on the old card, which is
+# what this workflow exists to prevent.
+#
+# Release notes come from the CHANGELOG: an "## Unreleased" section is dated
+# and used as the notes; with no section for the version, GitHub generates
+# notes from the merged PRs. Either can be edited on the release afterwards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, e.g. 0.5.6 (no leading v)"
+        required: true
+        type: string
+      prerelease:
+        description: "Pre-release: HACS only offers it to people with beta versions on"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check the version is new
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must look like 1.2.3 (no leading v); got '$VERSION'."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION already exists. Use the next version."
+            exit 1
+          fi
+          latest=$(git tag --list | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+            echo "::error::$VERSION isn't newer than the latest tag, $latest."
+            exit 1
+          fi
+          echo "Releasing $VERSION (latest tag: ${latest:-none}, pre-release: $PRERELEASE)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: card/package-lock.json
+
+      - name: Set version
+        run: python scripts/set_version.py "$VERSION" --notes-out "$RUNNER_TEMP/notes.md"
+
+      - name: Build and test the card
+        working-directory: card
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Lint and test the integration
+        run: |
+          pip install -r requirements_test.txt
+          ruff check custom_components tests scripts
+          pytest tests/ -q
+
+      - name: Commit, tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Files already at $VERSION; tagging main as it is."
+          else
+            git commit -am "Release $VERSION"
+          fi
+          git tag "$VERSION"
+          # Atomic: if main moved since checkout, nothing is pushed or tagged.
+          git push --atomic origin HEAD:main "refs/tags/$VERSION"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--title "$VERSION" --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            args+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            args+=(--generate-notes)
+          fi
+          gh release create "$VERSION" "${args[@]}"
+          echo "Published $(gh release view "$VERSION" --json url --jq .url)"
