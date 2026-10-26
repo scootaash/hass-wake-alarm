@@ -76,10 +76,15 @@ class GatedRunner:
     RAMPING/PLAYING and the transition can be observed), then ``release()`` to
     let it finish. Set ``exc`` to make it raise — used to prove the light path
     failing never stops the music path.
+
+    With ``plays``, the configured media players go to "playing" when it
+    starts, as the real music sequence's play_media does; the coordinator
+    watches them once the fade completes (#57).
     """
 
-    def __init__(self, label: str) -> None:
+    def __init__(self, label: str, *, plays: bool = False) -> None:
         self.label = label
+        self.plays = plays
         self.calls = 0
         self.kwargs_log: list[dict] = []
         self.started = asyncio.Event()
@@ -100,6 +105,9 @@ class GatedRunner:
         self.started.set()
         if self.exc is not None:
             raise self.exc
+        if self.plays:
+            for player in coordinator.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []:
+                coordinator.hass.states.async_set(player, "playing")
         # Finish on explicit release OR when the coordinator cancels us
         # (snooze/dismiss/unload set the cancel_event).
         rel = asyncio.ensure_future(self._release.wait())
@@ -253,7 +261,7 @@ async def env(hass):
     """Coordinator test harness: patched runners/notifications + builders."""
     await _force_utc(hass)
     ramp = GatedRunner("ramp")
-    music = GatedRunner("music")
+    music = GatedRunner("music", plays=True)
     cov = "custom_components.wake_alarm.coordinator"
     with (
         patch(f"{cov}.async_run_light_ramp", ramp),

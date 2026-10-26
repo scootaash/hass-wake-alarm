@@ -100,7 +100,10 @@ slug HA derived from your alarm's name.
    skips 1–4 tracks forward so each alarm and each snooze begins on a
    different track from the favourite, not always track 1.
 5. **End.** Music plays until you dismiss, snooze, or the auto-dismiss
-   timer fires (if `auto_dismiss_min` is configured > 0). The schedule
+   timer fires (if `auto_dismiss_min` is configured > 0). Stopping the
+   music on the speaker itself (Sonos app, voice, the speaker's button)
+   also counts as a dismiss once nothing has played for a minute; the
+   brief pause between tracks doesn't. The schedule
    rolls forward to the following enabled day the moment the alarm
    fires, so `sensor.my_alarm_next_alarm` always points at the next one.
 
@@ -150,8 +153,9 @@ machine, blinds, etc.
   (or, for a lights-only alarm, when the alarm fires). This is the hook for
   "do X the instant the alarm goes off". Skipped if the alarm is gated off by
   presence/condition.
-- **After** runs when the cycle ends: a dismiss or an auto-dismiss (a
-  lights-only alarm runs it at `alarm_time`). It does **not** run on snooze.
+- **After** runs when the cycle ends: a dismiss, an auto-dismiss, or the
+  music being stopped on the speaker (a lights-only alarm runs it at
+  `alarm_time`). It does **not** run on snooze.
 
 All three fire non-blocking, so a slow or failing script can never delay the
 wake-up, and each receives the instance `slug` and `name` as script

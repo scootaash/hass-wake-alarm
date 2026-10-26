@@ -50,6 +50,7 @@ from .const import (
     DEFAULT_AUTO_DISMISS_MIN,
     DEFAULT_LENGTH_MIN,
     DEFAULT_SNOOZE_MIN,
+    MUSIC_STOPPED_GRACE_SEC,
     STATE_IDLE,
     STATE_PLAYING,
     STATE_RAMPING,
@@ -115,6 +116,12 @@ class WakeAlarmCoordinator:
         # always elapses N minutes after the alarm originally fired —
         # never extended by repeat snoozes.
         self._auto_dismiss_deadline: datetime | None = None
+
+        # Once the music has faded in: the media-player state listener, and the
+        # grace timer that ends the alarm if nothing has been playing for
+        # MUSIC_STOPPED_GRACE_SEC (music stopped on the speaker, #57).
+        self._cancel_player_watch: CALLBACK_TYPE | None = None
+        self._cancel_stopped_timer: CALLBACK_TYPE | None = None
 
         # Whether an alarm occurrence is currently in progress. Delimits the
         # before-script (run once when the occurrence begins, at ramp-start or
@@ -293,6 +300,7 @@ class WakeAlarmCoordinator:
             self._music_task.cancel()
         self._cancel_snooze()
         self._cancel_auto_dismiss()
+        self._stop_player_watch()
         # Cancel any fire-and-forget tasks still in flight (#35).
         for task in list(self._background_tasks):
             task.cancel()
@@ -725,6 +733,11 @@ class WakeAlarmCoordinator:
             await async_run_music_sequence(
                 self, self._music_cancel_event, from_snooze=from_snooze
             )
+            # Faded in and still sounding (a snooze/dismiss mid-sequence has
+            # already moved the state on): from here the speaker decides when
+            # the music has stopped.
+            if self._state == STATE_PLAYING:
+                self._start_player_watch()
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -744,10 +757,82 @@ class WakeAlarmCoordinator:
             # NB: completing the fade does NOT end the occurrence. The media
             # player keeps playing on its own, so the coordinator stays in
             # PLAYING (keeping the card's snooze/dismiss buttons visible and
-            # auto-dismiss armed) until the user snoozes/dismisses or the
-            # auto-dismiss timer fires. A snooze/dismiss moves the state out of
-            # PLAYING and cancels the music task before reaching here, so the
-            # leftover `end_state` from a natural fade is intentionally unused.
+            # auto-dismiss armed) until the user snoozes/dismisses, the
+            # auto-dismiss timer fires, or the player watch sees the music has
+            # stopped. A snooze/dismiss moves the state out of PLAYING and
+            # cancels the music task before reaching here, so the leftover
+            # `end_state` from a natural fade is intentionally unused.
+
+    # -------------------- music stopped on the speaker --------------------
+
+    @callback
+    def _start_player_watch(self) -> None:
+        """End the alarm once its music has stopped on the speaker (#57).
+
+        After the fade the coordinator stays PLAYING until something ends the
+        occurrence (#54). Snooze, Dismiss and auto-dismiss do; stopping the
+        music on the speaker itself (Sonos app, voice, its button) didn't, so
+        with auto-dismiss off the alarm stayed "playing" indefinitely: the card
+        kept its buttons and a settings change waited for a dismiss that never
+        came, so the next alarm fired at the old time. Watch the players and
+        treat MUSIC_STOPPED_GRACE_SEC with none of them playing as a dismiss.
+        """
+        players = list(self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or [])
+        if not players:
+            return
+        self._stop_player_watch()
+        self._cancel_player_watch = async_track_state_change_event(
+            self.hass, players, self._async_on_player_change
+        )
+        self._check_players()
+
+    @callback
+    def _stop_player_watch(self) -> None:
+        if self._cancel_player_watch is not None:
+            self._cancel_player_watch()
+            self._cancel_player_watch = None
+        self._cancel_music_stopped_timer()
+
+    @callback
+    def _cancel_music_stopped_timer(self) -> None:
+        if self._cancel_stopped_timer is not None:
+            self._cancel_stopped_timer()
+            self._cancel_stopped_timer = None
+
+    @callback
+    def _async_on_player_change(self, _event: Event) -> None:
+        self._check_players()
+
+    @callback
+    def _check_players(self) -> None:
+        """Start the grace timer when nothing is playing; cancel it otherwise."""
+        if self._any_player_playing():
+            self._cancel_music_stopped_timer()
+        elif self._cancel_stopped_timer is None:
+            self._cancel_stopped_timer = async_call_later(
+                self.hass, MUSIC_STOPPED_GRACE_SEC, self._async_on_music_stopped
+            )
+
+    def _any_player_playing(self) -> bool:
+        # Buffering counts: it's a player mid-way into the next track.
+        for player in self.entry.data.get(CONF_MEDIA_PLAYER_ENTITIES) or []:
+            state = self.hass.states.get(player)
+            if state is not None and state.state in ("playing", "buffering"):
+                return True
+        return False
+
+    async def _async_on_music_stopped(self, _now: datetime) -> None:
+        self._cancel_stopped_timer = None
+        if self._state != STATE_PLAYING or self._any_player_playing():
+            return
+        _LOGGER.info(
+            "%s: music stopped on the speaker for %ds; ending the alarm",
+            self.slug,
+            MUSIC_STOPPED_GRACE_SEC,
+        )
+        # A real occurrence is skipped for today, as Dismiss would. Test music
+        # (no occurrence) must not skip a still-upcoming alarm today.
+        await self.async_dismiss(skip_today=self._cycle_active)
 
     # -------------------- snooze + dismiss --------------------
 
@@ -840,13 +925,15 @@ class WakeAlarmCoordinator:
             self._set_state(STATE_IDLE)
             self._finish_cycle()
 
-    async def async_dismiss(self) -> None:
+    async def async_dismiss(self, *, skip_today: bool = True) -> None:
         """Full dismiss per the brief.
 
         Stops music on all configured players, unjoins any formed group,
         cancels every pending task/timer, leaves lights as the user has
         them, returns to IDLE, and rolls the schedule forward past today's
-        occurrence (dismiss means "skip this one").
+        occurrence (dismiss means "skip this one"). ``skip_today=False`` only
+        re-arms the schedule; the music-stopped watch uses it for test music,
+        which has no occurrence to skip.
         """
         if self._state == STATE_IDLE:
             _LOGGER.debug("dismiss for %s: already idle", self.slug)
@@ -885,7 +972,7 @@ class WakeAlarmCoordinator:
         # IDLE no longer recomputes, so roll forward explicitly. skip_today
         # excludes today's occurrence even if dismiss happened during the ramp
         # (before alarm_time) — otherwise we'd re-select and re-fire today.
-        self.async_recompute_schedule(skip_today=True)
+        self.async_recompute_schedule(skip_today=skip_today)
 
     @callback
     def _cancel_snooze(self) -> None:
@@ -1168,6 +1255,10 @@ class WakeAlarmCoordinator:
             return
         _LOGGER.debug("%s: state %s -> %s", self.slug, self._state, new_state)
         self._state = new_state
+        if new_state != STATE_PLAYING:
+            # Snooze pauses the player on purpose, and once IDLE there's
+            # nothing to end; the watch only means anything while PLAYING.
+            self._stop_player_watch()
         if new_state == STATE_IDLE:
             # Clear the auto-dismiss deadline so the next fire starts fresh.
             # We intentionally do NOT recompute the schedule here: rolling the

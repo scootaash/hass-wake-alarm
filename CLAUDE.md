@@ -30,7 +30,9 @@ re-explained each session.
 - `coordinator.py` — the heart: the alarm **state machine** and scheduling.
   Arms timers via `async_track_point_in_time`, fires the light ramp at
   `alarm_time − length`, music at `alarm_time`, handles snooze / dismiss /
-  auto-dismiss, restart catch-up, and **presence gating** (checked twice — at
+  auto-dismiss, stays PLAYING after the fade until one of those or the
+  **player watch** (music stopped on the speaker for `MUSIC_STOPPED_GRACE_SEC`,
+  #57) ends it, restart catch-up, and **presence gating** (checked twice — at
   ramp-start for lights and again at alarm time for music). Side-effects
   (`async_run_light_ramp`, `async_run_music_sequence`, `async_send_*`
   notifications) are module-level functions so tests can patch them.
