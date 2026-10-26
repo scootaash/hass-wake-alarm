@@ -21,7 +21,11 @@ import {
   type TemplateResult,
 } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { resolveThumbnailUrl } from "./media-image";
+import {
+  resolveThumbnailUrl,
+  shouldResign,
+  thumbnailAction,
+} from "./media-image";
 import type { HomeAssistant } from "./types";
 
 @customElement("wake-alarm-thumb")
@@ -33,20 +37,46 @@ export class WakeAlarmThumb extends LitElement {
   @state() private _src?: string;
   @state() private _failed = false;
 
-  protected willUpdate(changed: PropertyValues): void {
-    if (changed.has("thumbnail") || changed.has("hass")) {
-      void this._resolve();
+  // The thumbnail value we last signed (or undefined if none). Used to skip the
+  // re-sign that an unchanged thumbnail would otherwise trigger on every hass
+  // state update — the flicker/reload from #19.
+  private _resolvedFor?: string | null;
+  private _resolving = false;
+  // The thumbnail already re-signed after a load error (see shouldResign), so
+  // artwork that is really broken falls back to the icon instead of looping.
+  private _retriedFor?: string | null;
+
+  protected willUpdate(_changed: PropertyValues): void {
+    switch (thumbnailAction(this.thumbnail, this._resolvedFor)) {
+      case "resolve":
+        if (this.hass && !this._resolving) void this._resolve();
+        break;
+      case "clear":
+        this._resolvedFor = undefined;
+        this._src = undefined;
+        this._failed = false;
+        break;
     }
   }
 
   private async _resolve(): Promise<void> {
     const thumb = this.thumbnail;
-    this._failed = false;
-    this._src = undefined;
     if (!thumb || !this.hass) return;
-    const url = await resolveThumbnailUrl(this.hass, thumb);
-    // A newer thumbnail may have been assigned while we awaited signing.
-    if (this.thumbnail === thumb) this._src = url;
+    this._resolving = true;
+    // Record the in-flight thumbnail synchronously so a hass update mid-await
+    // doesn't kick off a second resolve for the same artwork.
+    this._resolvedFor = thumb;
+    this._failed = false;
+    try {
+      const url = await resolveThumbnailUrl(this.hass, thumb);
+      // A newer thumbnail may have been assigned while we awaited signing.
+      if (this.thumbnail === thumb) this._src = url;
+    } finally {
+      this._resolving = false;
+      // willUpdate skipped a newer thumbnail while we were busy; run it now
+      // rather than leaving the old artwork up until the next hass update.
+      if (this.thumbnail !== thumb) this.requestUpdate();
+    }
   }
 
   protected render(): TemplateResult {
@@ -64,6 +94,15 @@ export class WakeAlarmThumb extends LitElement {
   }
 
   private _onError = (): void => {
+    if (shouldResign(this.thumbnail, this._src, this._retriedFor)) {
+      this._retriedFor = this.thumbnail;
+      // Forgetting the signed URL makes willUpdate see new artwork and sign it
+      // again. Clearing _src also gives the retry a fresh <img>, which reports
+      // load or error even if the new URL happens to match the old one.
+      this._resolvedFor = undefined;
+      this._src = undefined;
+      return;
+    }
     this._failed = true;
   };
 

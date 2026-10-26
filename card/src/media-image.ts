@@ -19,6 +19,53 @@
  */
 import type { HomeAssistant } from "./types";
 
+/**
+ * Decide what <wake-alarm-thumb> should do with its current artwork, given the
+ * thumbnail it last resolved (`resolvedFor`):
+ *   - "resolve" — there's new artwork to sign;
+ *   - "clear"   — artwork was removed, drop the now-stale image;
+ *   - "none"    — nothing changed.
+ *
+ * The key property is that an unchanged thumbnail returns "none". `willUpdate`
+ * fires on every `hass` state update (many per second) with the same thumbnail;
+ * re-signing then blanked the <img> src and reloaded it on every tick — the
+ * thumbnail flicker/reload reported in #19 — besides flooding HA with one
+ * `auth/sign_path` call per tile per tick.
+ */
+export type ThumbnailAction = "resolve" | "clear" | "none";
+
+export function thumbnailAction(
+  thumbnail: string | null | undefined,
+  resolvedFor: string | null | undefined,
+): ThumbnailAction {
+  if (!thumbnail) return resolvedFor ? "clear" : "none";
+  return thumbnail === resolvedFor ? "none" : "resolve";
+}
+
+/**
+ * Whether artwork whose <img> failed to load should be signed again and
+ * retried once, rather than falling back to the icon.
+ *
+ * Signing once per tile means a signed URL can expire before it's used:
+ * auth/sign_path signatures last 30 s by default, every tile is signed when the
+ * list renders, and the <img> is lazy, so artwork scrolled into view later gets
+ * a 401. Only a signed URL (HA's `authSig` query parameter) can have expired,
+ * and each thumbnail is retried once, so artwork that is genuinely missing
+ * still falls back to the icon.
+ */
+export function shouldResign(
+  thumbnail: string | null | undefined,
+  failedSrc: string | undefined,
+  retriedFor: string | null | undefined,
+): boolean {
+  return (
+    !!thumbnail &&
+    thumbnail !== retriedFor &&
+    !!failedSrc &&
+    /[?&]authSig=/.test(failedSrc)
+  );
+}
+
 export async function resolveThumbnailUrl(
   hass: HomeAssistant,
   thumbnail: string,
