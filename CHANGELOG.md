@@ -4,11 +4,40 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.5.5 — 2026-10-26
+
+Fixes the missing dashboard card, alarms playing through whole Sonos groups,
+and flickering media-picker artwork. Supersedes the 0.5.1–0.5.4 pre-releases
+(0.5.3 and 0.5.4 shipped with the manifest still at 0.5.0, so browsers kept
+serving the cached 0.5.0 card).
+
+### Added
+
+- **Notification tap target (#55).** Optional dashboard path: tapping an alarm
+  notification opens it (iOS `url` / Android `clickAction`). Config entry v6,
+  additive no-op migration.
 
 ### Fixed
 
-- **Media-picker thumbnails flickered / reloaded continuously (#19).** Each
+- **"Custom element doesn't exist: wake-alarm-card" (#56, #59).** The card was
+  injected into the page with `add_extra_js_url`, where it raced Home
+  Assistant's app script: the app swaps in a polyfilled
+  `window.customElements` as it starts, and elements defined before that are
+  invisible to HA. The card is now stored as a Lovelace resource, which the
+  dashboard loads after the app is up; a stored resource also reaches
+  dashboards opened while HA is still starting. A hand-added resource for the
+  card is updated in place rather than duplicated. `add_extra_js_url` remains
+  only as the YAML-resource-mode fallback, with a warning naming the line to
+  add.
+- **Alarm played in every grouped Sonos room (#60).** With one speaker
+  configured, the speaker is now unjoined from any group (then the 3 s UPnP
+  settle) before it plays. Sonos routes play/shuffle/next-track to the group
+  coordinator but volume to the speaker, so previously the whole group played
+  the alarm and only the alarm speaker faded in.
+- **Card buttons and auto-dismiss after the fade (#54).** The alarm now stays
+  in `playing` once the fade completes, so snooze/dismiss and auto-dismiss keep
+  working.
+- **Media-picker thumbnails flickered / reloaded continuously (#19, #53).** Each
   thumbnail re-signed its artwork URL on every Home Assistant state update,
   blanking the `<img>` and reloading it many times a second (and flooding HA
   with one `auth/sign_path` call per tile per tick — noticeable on large Music
