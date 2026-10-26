@@ -573,6 +573,154 @@ async def test_snooze_and_dismiss_work_after_fade_completes(
     assert len(env.media_calls["media_stop"]) == 1
 
 
+
+# --------------------------------------------------------------------------
+# music stopped on the speaker (#57)
+# --------------------------------------------------------------------------
+
+SUN = 6
+PLAYER = "media_player.bedroom"
+
+
+def sun(hour: int, minute: int) -> datetime:
+    """A UTC datetime on the Sunday after the anchor Saturday."""
+    return at(hour, minute) + timedelta(days=1)
+
+
+async def set_player(env, state: str, player: str = PLAYER) -> None:
+    """Set a media player's state and let the coordinator's listener run
+    before the frozen clock moves on."""
+    env.hass.states.async_set(player, state)
+    await env.hass.async_block_till_done()
+
+
+async def test_music_stopped_on_speaker_ends_the_alarm(env, freezer) -> None:
+    """#57: stopping the music on the speaker, rather than pressing Dismiss,
+    ends the alarm once nothing has played for a minute, as a dismiss would
+    (after-script, today skipped). Auto-dismiss is off (the default)."""
+    freezer.move_to(at(5, 0))
+    after = async_mock_service(env.hass, "script", "after")
+    coord = await env.build(
+        env.make_entry(after_script="script.after"), days=SAT | {SUN}
+    )
+    await fire(env.hass, freezer, at(7, 0))
+    assert coord.state == STATE_PLAYING
+
+    # Stopped in the Sonos app five minutes in.
+    await fire(env.hass, freezer, at(7, 5))
+    await set_player(env, "paused")
+
+    await fire(env.hass, freezer, at(7, 5, 59))
+    assert coord.state == STATE_PLAYING
+
+    await fire(env.hass, freezer, at(7, 6))
+    assert coord.state == STATE_IDLE
+    assert coord.is_active is False
+    assert len(after) == 1
+    assert coord.next_fire == sun(7, 0)
+
+
+async def test_track_change_blip_does_not_end_the_alarm(env, freezer) -> None:
+    """#57's timeline: the player shows idle for ~0.2 s between tracks. That,
+    or a longer gap under a minute, must not end the alarm."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+    await fire(env.hass, freezer, at(7, 0))
+
+    await set_player(env, "idle")
+    await set_player(env, "playing")
+    await fire(env.hass, freezer, at(7, 1))
+    await set_player(env, "idle")
+    await fire(env.hass, freezer, at(7, 1, 45))
+    await set_player(env, "buffering")
+    await fire(env.hass, freezer, at(7, 3))
+    await set_player(env, "playing")
+
+    await fire(env.hass, freezer, at(7, 30))
+    assert coord.state == STATE_PLAYING
+    assert len(env.media_calls["media_stop"]) == 0
+
+
+async def test_settings_change_applies_after_music_stopped_on_speaker(
+    env, freezer
+) -> None:
+    """The consequence that made #57's follow-on matter: with the alarm stuck
+    PLAYING, an evening change of alarm time was held back (#44) and the next
+    alarm fired at the old time. Once the alarm ends, the change applies."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT | {SUN})
+    await fire(env.hass, freezer, at(7, 0))
+    await fire(env.hass, freezer, at(7, 5))
+    await set_player(env, "paused")
+
+    await fire(env.hass, freezer, at(20, 0))
+    env.hass.states.async_set("time.test_alarm_time", "09:00:00")
+    await env.hass.async_block_till_done()
+    assert coord.next_fire == sun(9, 0)
+
+    await fire(env.hass, freezer, sun(7, 0))
+    assert env.music.calls == 1
+    await fire(env.hass, freezer, sun(9, 0))
+    assert env.music.calls == 2
+
+
+async def test_snooze_pause_does_not_end_the_alarm(env, freezer) -> None:
+    """Snooze pauses the player on purpose; the watch only runs while
+    PLAYING, so a snooze longer than the grace period still resumes."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT, snooze_min=5)
+    await fire(env.hass, freezer, at(7, 0))
+
+    await coord.async_snooze()
+    await set_player(env, "paused")
+    await fire(env.hass, freezer, at(7, 3))
+    assert coord.state == STATE_SNOOZING
+
+    await fire(env.hass, freezer, at(7, 5))
+    assert coord.state == STATE_PLAYING
+    assert env.music.calls == 2
+
+
+async def test_one_of_two_players_still_playing_keeps_the_alarm(
+    env, freezer
+) -> None:
+    """With several speakers, the alarm only ends when none is playing."""
+    freezer.move_to(at(5, 0))
+    players = ["media_player.bedroom", "media_player.ensuite"]
+    coord = await env.build(
+        env.make_entry(media_player_entities=players), days=SAT
+    )
+    await fire(env.hass, freezer, at(7, 0))
+
+    await set_player(env, "paused", players[0])
+    await fire(env.hass, freezer, at(7, 10))
+    assert coord.state == STATE_PLAYING
+
+    await set_player(env, "paused", players[1])
+    await fire(env.hass, freezer, at(7, 11))
+    assert coord.state == STATE_IDLE
+
+
+async def test_stopped_test_music_does_not_skip_todays_alarm(
+    env, freezer
+) -> None:
+    """Test music stopped on the speaker ends like a dismiss, but there's no
+    occurrence to skip: today's alarm must still fire."""
+    freezer.move_to(at(5, 0))
+    coord = await env.build(env.make_entry(), days=SAT)
+    await coord.async_test_music()
+    await env.hass.async_block_till_done()
+    assert coord.state == STATE_PLAYING
+
+    await set_player(env, "idle")
+    await fire(env.hass, freezer, at(5, 2))
+    assert coord.state == STATE_IDLE
+    assert coord.next_fire == at(7, 0)
+
+    await fire(env.hass, freezer, at(7, 0))
+    assert env.music.calls == 2
+
+
 async def test_dismiss_during_ramp_skips_today(env, freezer) -> None:
     """Dismiss before alarm_time rolls past today; the alarm never fires."""
     freezer.move_to(at(5, 0))

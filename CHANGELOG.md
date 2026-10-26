@@ -4,6 +4,19 @@ All notable changes to this project will be documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Alarm stayed "playing" after the music was stopped on the speaker (#57).**
+  Since the alarm stays active after the fade (#54), only Snooze, Dismiss or
+  auto-dismiss (off by default) ended it. Stopping the music in the Sonos app,
+  by voice or on the speaker left the card's buttons up all day, and a change
+  to the alarm time waited for a dismiss that never came, so the next alarm
+  fired at the old time. The alarm now ends, as a dismiss would, once none of
+  its speakers has played for a minute; the brief idle between tracks doesn't
+  count. Stopping test music this way doesn't skip today's alarm.
+
 ## 0.5.5 — 2026-10-26
 
 Fixes the missing dashboard card, alarms playing through whole Sonos groups,

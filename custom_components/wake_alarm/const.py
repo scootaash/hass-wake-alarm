@@ -75,6 +75,13 @@ DEFAULT_STEPS_PER_MIN = 20
 DEFAULT_MUSIC_FADE_SEC = 60
 DEFAULT_AUTO_DISMISS_MIN = 0
 
+# Once the music has faded in, the alarm ends (as if dismissed) when none of its
+# media players has been playing for this long, e.g. the user stopped it on the
+# speaker instead of pressing Dismiss. Long enough to ride out the brief idle a
+# player shows between tracks (#57 saw ~0.2 s), short enough that the card's
+# buttons and a pending settings change don't hang on for hours.
+MUSIC_STOPPED_GRACE_SEC = 60
+
 # Restart catch-up window. If Home Assistant is down at alarm_time and boots
 # back up within this many minutes, the alarm fires immediately so the user is
 # still woken; beyond it, the schedule simply rolls forward to the next day.

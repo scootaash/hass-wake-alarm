@@ -7,6 +7,7 @@ whose manifest still names the old version: the card's cache-bust).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,19 @@ def repo(tmp_path: Path) -> Path:
     for rel in FILES:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / rel, tmp_path / rel)
+    # The real CHANGELOG usually carries an "## Unreleased" section between
+    # releases; drop it so each test sets up exactly the sections it means to.
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        re.sub(
+            r"^## Unreleased[ \t]*\n.*?(?=^## )",
+            "",
+            changelog.read_text(encoding="utf-8"),
+            count=1,
+            flags=re.MULTILINE | re.DOTALL,
+        ),
+        encoding="utf-8",
+    )
     return tmp_path
 
 
