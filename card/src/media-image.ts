@@ -42,6 +42,30 @@ export function thumbnailAction(
   return thumbnail === resolvedFor ? "none" : "resolve";
 }
 
+/**
+ * Whether artwork whose <img> failed to load should be signed again and
+ * retried once, rather than falling back to the icon.
+ *
+ * Signing once per tile means a signed URL can expire before it's used:
+ * auth/sign_path signatures last 30 s by default, every tile is signed when the
+ * list renders, and the <img> is lazy, so artwork scrolled into view later gets
+ * a 401. Only a signed URL (HA's `authSig` query parameter) can have expired,
+ * and each thumbnail is retried once, so artwork that is genuinely missing
+ * still falls back to the icon.
+ */
+export function shouldResign(
+  thumbnail: string | null | undefined,
+  failedSrc: string | undefined,
+  retriedFor: string | null | undefined,
+): boolean {
+  return (
+    !!thumbnail &&
+    thumbnail !== retriedFor &&
+    !!failedSrc &&
+    /[?&]authSig=/.test(failedSrc)
+  );
+}
+
 export async function resolveThumbnailUrl(
   hass: HomeAssistant,
   thumbnail: string,

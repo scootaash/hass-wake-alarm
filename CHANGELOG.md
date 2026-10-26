@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   blanking the `<img>` and reloading it many times a second (and flooding HA
   with one `auth/sign_path` call per tile per tick — noticeable on large Music
   Assistant artist/album/track lists). Artwork is now signed once per tile and
-  only re-signed when the artwork itself changes.
+  only re-signed when the artwork itself changes. A signed URL that has expired
+  by the time a lazily-loaded tile scrolls into view is signed again once,
+  rather than dropping to the placeholder icon.
 
 ## 0.5.0 — 2026-06-18
 
