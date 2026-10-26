@@ -38,7 +38,7 @@ itself; add it to your `resources:` (bump `?v=` when you update, so
 browsers fetch the new card):
 
 ```yaml
-- url: /wake_alarm/wake-alarm-card.js?v=0.5.0
+- url: /wake_alarm/wake-alarm-card.js?v=0.5.5
   type: module
 ```
 

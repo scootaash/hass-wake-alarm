@@ -185,7 +185,7 @@ window.customCards.push({
 
 // eslint-disable-next-line no-console
 console.info(
-  "%c WAKE-ALARM-CARD %c v0.5.0 ",
+  "%c WAKE-ALARM-CARD %c v0.5.5 ",
   "color: white; background: #ff5722; font-weight: 700;",
   "color: #ff5722; background: white; font-weight: 700;",
 );

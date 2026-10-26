@@ -13,6 +13,8 @@ re-explained each session.
   **committed** at `custom_components/wake_alarm/www/wake-alarm-card.js`.
 - `tests/` — Python test suite (pytest + pytest-homeassistant-custom-component).
 - `.github/workflows/ci.yml` — CI (pytest matrix, ruff, card build).
+- `.github/workflows/release.yml` + `scripts/set_version.py` — releases (see
+  **Releasing**).
 - `hacs.json` / `custom_components/wake_alarm/manifest.json` — HACS / HA metadata.
 
 ## Architecture (integration)
@@ -87,8 +89,8 @@ When adding fields to config-entry **data**, bump the entry version and extend
   `pytest tests/ --cov --cov-report=term-missing`.
 
 ### Lint
-- `ruff check custom_components tests` — rules `E,F,W,I`, line-length 88. Must be
-  clean (hard CI gate).
+- `ruff check custom_components tests scripts` — rules `E,F,W,I`, line-length
+  88. Must be clean (hard CI gate).
 
 ### Card
 - `cd card && npm ci`
@@ -105,6 +107,26 @@ When adding fields to config-entry **data**, bump the entry version and extend
   PHACC builds pin a removed `mypy-dev` alpha and won't install, so 2024.6 is the
   oldest installable floor.
 - `card` job: lint + vitest + build + **bundle-freshness** check.
+
+## Releasing
+- Actions → **Release** → Run workflow, enter `X.Y.Z` and choose pre-release
+  (HACS only offers pre-releases to users with beta versions on; promote one by
+  editing the release and unticking pre-release). The workflow runs
+  `scripts/set_version.py`, rebuilds the card, runs ruff + pytest + the card
+  checks, commits "Release X.Y.Z" to `main`, tags that commit and publishes the
+  release. It refuses a version that isn't newer than the latest tag.
+- `set_version.py` writes the manifest version (also the card's `?v=` browser
+  cache-bust), the card `package.json` + lockfile, the card's console banner and
+  the README's YAML example; it fails if a version string it must update has
+  changed format (`tests/test_set_version.py` runs it against the real files).
+- Put user-facing changes under `## Unreleased` in `CHANGELOG.md`: the workflow
+  dates that heading and uses the section as the release notes. Without one,
+  GitHub generates notes from the merged PRs.
+- Don't tag releases by hand from the release form. A tag on a commit whose
+  manifest still names the old version leaves browsers on the cached old card
+  (the 0.5.3 / 0.5.4 pre-releases did this).
+- The workflow pushes to `main` as `github-actions[bot]`. If `main` gets branch
+  protection, allow that bypass or the push step fails.
 
 ## Minimum supported HA
 **2024.6** (`hacs.json`). Keep changes compatible with it (e.g. `config_flow`
