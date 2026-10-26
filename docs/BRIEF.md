@@ -216,9 +216,10 @@ Two paths.
 
 **Single player, or multi-player non-Sonos / non-grouping (config flow blocks the latter, but defensive):**
 
-1. Set volume to 0 on the player(s).
-2. `media_player.play_media` with configured `media_content_id` and `media_content_type`.
-3. Linearly fade volume from 0 to `target_volume` over `music_fade_sec` seconds in 20 steps.
+1. `media_player.unjoin` on each player that advertises GROUPING, then wait 3 seconds (UPnP 800 mitigation). Ported from the legacy YAML, which unjoined its single player before playing: Sonos routes `play_media` to the group coordinator but `volume_set` to the speaker, so a grouped speaker would play the alarm in every grouped room, unfaded.
+2. Set volume to 0 on the player(s).
+3. `media_player.play_media` with configured `media_content_id` and `media_content_type`.
+4. Linearly fade volume from 0 to `target_volume` over `music_fade_sec` seconds in 20 steps.
 
 **Multi-player Sonos or other GROUPING-capable:**
 
