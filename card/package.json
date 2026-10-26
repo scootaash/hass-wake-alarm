@@ -1,6 +1,6 @@
 {
   "name": "wake-alarm-card",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Lovelace card for the Wake Alarm Home Assistant integration.",
   "private": true,
   "type": "module",
