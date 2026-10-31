@@ -10,6 +10,9 @@ asyncio_mode = "auto"
 filterwarnings = [
   "default",
   "ignore::DeprecationWarning",
+  # Raised by Home Assistant's own http component (not our code) once per test
+  # that starts it; it otherwise shows up as a run of CI annotations.
+  "ignore:It is recommended to use web.AppKey instances for keys",
 ]
 
 [tool.coverage.run]

@@ -192,6 +192,7 @@ The schedule rolls forward to the next enabled day **only when the alarm timer f
 3. Check media_player availability. If any required player is unavailable, send the urgent notification and skip music. If no media is selected, send the no-media notification and skip music. Otherwise transition to `playing`, start the music sequence, and send the standard notification.
 4. In all cases, roll the schedule forward to the next enabled day afterwards.
 5. After `auto_dismiss_min` minutes (if configured > 0): trigger dismiss automatically.
+6. The fade finishing does not end the occurrence: the state stays `playing` until snooze, dismiss or auto-dismiss (#54), or until none of the alarm's players has been `playing`/`buffering` for `MUSIC_STOPPED_GRACE_SEC` (60 s), which is treated as a dismiss (#57). The grace period rides out the idle between tracks.
 
 Because presence is evaluated separately for each timer, someone who was out at `ramp_start` but home by `alarm_time` is still woken (and vice versa: lights ramp, but no music if they've left).
 
